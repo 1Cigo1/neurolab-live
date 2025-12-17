@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react'; // useRef eklendi
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Stars } from '@react-three/drei';
 import NeuralNetwork from './components/NeuralNetwork';
@@ -6,7 +6,7 @@ import { useBrain } from './useBrain';
 import './App.css';
 import io from 'socket.io-client';
 
-// SOCKET BAĞLANTISI
+// SOCKET BAĞLANTISI (Render linkini kontrol et)
 const socket = io.connect("https://neurolab-server-xyz.onrender.com"); 
 
 function App() {
@@ -15,13 +15,28 @@ function App() {
   const [architecture, setArchitecture] = useState([2, 4, 4, 1]);
   const [learningRate, setLearningRate] = useState(0.03);
   const [manualInput, setManualInput] = useState([0, 0]); 
+  const [deadNeurons, setDeadNeurons] = useState([]);
+
+  // State'lerin güncel halini socket içinde kullanabilmek için Ref kullanıyoruz
+  const architectureRef = useRef(architecture);
+  const deadNeuronsRef = useRef(deadNeurons);
+
+  // State her değiştiğinde Ref'i güncelle
+  useEffect(() => {
+    architectureRef.current = architecture;
+  }, [architecture]);
+
+  useEffect(() => {
+    deadNeuronsRef.current = deadNeurons;
+  }, [deadNeurons]);
 
   const { weights, loss, isTraining, predictions, train } = useBrain(architecture);
-
   const inputs = ["0, 0", "0, 1", "1, 0", "1, 1"];
   const targets = [0, 1, 1, 0];
 
+  // --- SOCKET DİNLEYİCİLERİ ---
   useEffect(() => {
+    // 1. Başkası mimariyi değiştirirse al
     socket.on("sync_architecture", (data) => {
       const cleanArchitecture = Array.isArray(data) ? data : data.architecture;
       if (cleanArchitecture && Array.isArray(cleanArchitecture)) {
@@ -29,15 +44,40 @@ function App() {
       }
     });
 
+    // 2. Başkası eğitimi başlatırsa konsola yaz
     socket.on("sync_training_start", () => {
       console.log("Eğitim başlatıldı.");
+    });
+
+    // 3. Başkası sabotaj yaparsa al
+    socket.on("sync_dead_neurons", (incomingDeadList) => {
+        setDeadNeurons(incomingDeadList);
+    });
+
+    // 4. (YENİ) Odaya yeni biri girerse, elimdeki güncel veriyi ona gönder!
+    socket.on("user_joined", () => {
+        console.log("Odaya yeni biri girdi! Güncel veriyi gönderiyorum...");
+        
+        // Elimizdeki en güncel mimariyi ve ölü nöronları yolluyoruz
+        if (room) {
+            socket.emit("sync_architecture", { 
+                room: room, 
+                architecture: architectureRef.current 
+            });
+            socket.emit("sync_dead_neurons", {
+                room: room,
+                deadNeurons: deadNeuronsRef.current
+            });
+        }
     });
 
     return () => {
       socket.off("sync_architecture");
       socket.off("sync_training_start");
+      socket.off("sync_dead_neurons");
+      socket.off("user_joined");
     };
-  }, []);
+  }, [room]); // room değişince dinleyicileri yenile
 
   const joinRoom = () => {
     if (room !== "") {
@@ -48,12 +88,27 @@ function App() {
 
   const updateArchitecture = (newArch) => {
     setArchitecture(newArch);
+    setDeadNeurons([]); 
     socket.emit("sync_architecture", { room, architecture: newArch });
+    // Mimari değişince ölü nöron listesi sıfırlandığı için onu da bildir
+    socket.emit("sync_dead_neurons", { room, deadNeurons: [] });
   };
 
   const handleTrain = () => {
     train(learningRate); 
     socket.emit("sync_training_start", room);
+  };
+
+  const toggleNeuronLife = (id) => {
+    let newDeadList;
+    if (deadNeurons.includes(id)) {
+      newDeadList = deadNeurons.filter(deadId => deadId !== id);
+    } else {
+      newDeadList = [...deadNeurons, id];
+    }
+    setDeadNeurons(newDeadList);
+    // Değişikliği sunucuya bildir
+    socket.emit("sync_dead_neurons", { room, deadNeurons: newDeadList });
   };
 
   // --- GİRİŞ EKRANI ---
@@ -85,7 +140,6 @@ function App() {
 
   // --- ANA EKRAN ---
   return (
-    // Arka plan rengini zifiri siyahtan (#000) koyu laciverte (#050b14) çektim.
     <div style={{ width: "100vw", height: "100vh", background: "#050b14" }}>
       
       <div className="ui-panel">
@@ -101,7 +155,7 @@ function App() {
           
           <div style={{ marginBottom: '10px' }}>
             <div style={{ display:'flex', justifyContent:'space-between', fontSize:'10px', color:'#aaa', marginBottom:'5px' }}>
-              <span>ÖĞRENME HIZI (LEARNING RATE)</span>
+              <span>ÖĞRENME HIZI</span>
               <span style={{color:'var(--neon-blue)'}}>{learningRate}</span>
             </div>
             <input 
@@ -141,6 +195,10 @@ function App() {
               })()}
             </strong>
           </div>
+        </div>
+
+        <div className="info-text" style={{textAlign:'center', color:'#ffaa00', marginBottom:'10px'}}>
+           ⚠️ SABOTAJ MODU: Nöronlara tıklayarak yok edebilirsiniz.
         </div>
 
         <table className="data-table">
@@ -187,29 +245,20 @@ function App() {
         </div>
       </div>
 
-      {/* --- AYDINLIK UZAY AYARLARI --- */}
       <Canvas camera={{ position: [0, 0, 120], fov: 60 }}> 
-        
-        {/* 1. Arka Plan Rengi: 3D Sahneye hafif gri ton ekler, böylece tam siyah olmaz */}
         <color attach="background" args={['#050b14']} />
-
-        {/* 2. Ortam Işığı (Ambient): Bunu artırdık, gölgeleri yok eder */}
         <ambientLight intensity={5.0} /> 
-
-        {/* 3. Atmosfer Işığı (Hemisphere): Yukarıdan beyaz, aşağıdan gri ışık verir. Çok doğaldır. */}
         <hemisphereLight skyColor="#ffffff" groundColor="#444444" intensity={2.0} />
-
-        {/* 4. Noktasal Işıklar: Bunları devasa yaptık ve mesafesini artırdık */}
         <pointLight position={[100, 100, 100]} intensity={3.0} color="#ffffff" distance={1000} />
         <pointLight position={[-100, -100, -100]} intensity={3.0} color="#00aaff" distance={1000} />
-        
-        {/* 5. Yıldızlar: Sayısını ve parlaklığını artırdık */}
-        <Stars radius={300} depth={100} count={10000} factor={15} saturation={0} fade />
+        <Stars radius={300} depth={100} count={10000} factor={7} saturation={0} fade />
         
         <NeuralNetwork 
           architecture={architecture} 
           weights={weights} 
           manualInput={manualInput} 
+          deadNeurons={deadNeurons}
+          onNeuronClick={toggleNeuronLife}
         />
         
         <OrbitControls 
