@@ -1,0 +1,209 @@
+/* Google Fontları */
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=Roboto+Mono:wght@300;400;700&display=swap');
+
+:root {
+  --neon-blue: #00f3ff;
+  --neon-green: #00ff9d;
+  --neon-red: #ff0055;
+  --glass-bg: rgba(10, 15, 20, 0.85); /* Biraz daha koyu yaptım, okunurluk artsın */
+  --border-color: rgba(0, 243, 255, 0.3);
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden; /* Scrollbar çıkmasını engeller */
+  font-family: 'Roboto Mono', monospace;
+  background-color: #050505;
+}
+
+/* =========================================
+   1. GİRİŞ EKRANI (LOGIN SCREEN)
+   ========================================= */
+.login-container {
+  width: 100vw;
+  height: 100vh;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 100; /* En üstte görünsün */
+}
+
+.login-box {
+  z-index: 101;
+  text-align: center;
+  background: rgba(0, 20, 30, 0.9);
+  padding: 40px;
+  border: 1px solid var(--neon-blue);
+  box-shadow: 0 0 30px rgba(0, 243, 255, 0.2);
+  backdrop-filter: blur(10px);
+  border-radius: 8px;
+  width: 300px;
+}
+
+.login-box h1 {
+  font-family: 'Orbitron', sans-serif;
+  color: var(--neon-blue);
+  margin-bottom: 5px;
+  letter-spacing: 2px;
+  font-size: 24px;
+}
+
+.login-box p {
+  color: var(--neon-green);
+  font-size: 10px;
+  letter-spacing: 2px;
+  margin-bottom: 30px;
+}
+
+.login-box input {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  margin-bottom: 20px;
+  background: rgba(0,0,0,0.5);
+  border: 1px solid #333;
+  color: white;
+  text-align: center;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 14px;
+  outline: none;
+  box-sizing: border-box; /* Padding taşmasın */
+}
+
+.login-box input:focus {
+  border-color: var(--neon-blue);
+  box-shadow: 0 0 10px rgba(0, 243, 255, 0.3);
+}
+
+.login-canvas {
+  position: absolute !important;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+}
+
+/* =========================================
+   2. ANA OYUN ARAYÜZÜ (MAIN HUD)
+   Eski "Sol Panel" görünümünü burası sağlıyor
+   ========================================= */
+.ui-panel {
+  position: absolute; /* Ekranda asılı kalmasını sağlayan kod bu */
+  top: 20px;
+  left: 20px;
+  width: 320px; /* Genişliği sabitledik, ekrana yayılmayacak */
+  z-index: 10;
+  color: #eee;
+  
+  /* Cam Efekti */
+  background: var(--glass-bg);
+  backdrop-filter: blur(12px); 
+  -webkit-backdrop-filter: blur(12px);
+  
+  /* Kenarlıklar */
+  border: 1px solid var(--border-color);
+  box-shadow: 0 0 20px rgba(0, 0, 0, 0.5);
+  
+  padding: 20px;
+  border-radius: 4px;
+  max-height: 90vh; /* Çok uzun olursa ekranı taşmasın */
+  overflow-y: auto;
+}
+
+/* Başlıklar */
+h3 {
+  font-family: 'Orbitron', sans-serif;
+  color: var(--neon-blue);
+  margin-top: 0;
+  letter-spacing: 2px;
+  font-size: 16px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+}
+
+/* Durum Rozeti */
+.status-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: bold;
+  padding: 4px 8px;
+  border-radius: 2px;
+  text-transform: uppercase;
+  margin-bottom: 15px;
+  letter-spacing: 1px;
+}
+.connected {
+  color: #050505;
+  background: var(--neon-green);
+  box-shadow: 0 0 10px var(--neon-green);
+}
+
+/* Tablo */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 15px 0;
+  font-size: 11px;
+}
+.data-table th {
+  text-align: left;
+  color: var(--neon-blue);
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+.data-table td {
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+/* Butonlar */
+button {
+  background: rgba(0, 243, 255, 0.1);
+  color: var(--neon-blue);
+  border: 1px solid var(--neon-blue);
+  padding: 10px;
+  border-radius: 2px;
+  cursor: pointer;
+  font-family: 'Orbitron', sans-serif;
+  font-size: 11px;
+  transition: all 0.3s ease;
+  text-transform: uppercase;
+  margin-bottom: 5px;
+}
+
+button:hover:not(:disabled) {
+  background: var(--neon-blue);
+  color: #000;
+  box-shadow: 0 0 15px var(--neon-blue);
+}
+
+button:disabled {
+  border-color: #555;
+  color: #555;
+  cursor: not-allowed;
+}
+
+.btn-reset {
+  background: rgba(255, 0, 85, 0.1);
+  color: var(--neon-red);
+  border-color: var(--neon-red);
+}
+.btn-reset:hover:not(:disabled) {
+  background: var(--neon-red);
+  color: #fff;
+  box-shadow: 0 0 15px var(--neon-red);
+}
+
+.info-text {
+  font-size: 10px;
+  color: #888;
+  margin-top: 5px;
+  text-transform: uppercase;
+}
