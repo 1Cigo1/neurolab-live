@@ -6,7 +6,7 @@ import { useBrain } from './useBrain';
 import './App.css';
 import io from 'socket.io-client';
 
-const socket = io.connect("http://localhost:3001");
+const socket = io.connect("https://neurolab-live-server.onrender.com");
 
 function App() {
   // --- STATE'LER ---
