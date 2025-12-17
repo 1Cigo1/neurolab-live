@@ -7,7 +7,7 @@ import './App.css';
 import io from 'socket.io-client';
 
 // SOCKET BAĞLANTISI (Render linkini kontrol et)
-const socket = io.connect("https://neurolab-server-xyz.onrender.com"); 
+const socket = io.connect("https://neurolab-live-server.onrender.com"); 
 
 function App() {
   const [room, setRoom] = useState(""); 
