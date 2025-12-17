@@ -207,3 +207,55 @@ button:disabled {
   margin-top: 5px;
   text-transform: uppercase;
 }
+@media screen and (max-width: 768px) {
+  
+  /* Panel Ayarları */
+  .ui-panel {
+    width: 85%;         /* Ekranın %85'ini kaplasın (Taşmasın) */
+    left: 50%;          /* Ortala */
+    transform: translateX(-50%); /* Tam merkeze hizala */
+    top: 10px;          /* Yukarıya biraz daha yapışsın */
+    padding: 10px;      /* İç boşluğu azaltalım */
+    max-height: 35vh;   /* Ekranın en fazla %35'ini kaplasın (3D görünür kalsın) */
+    overflow-y: auto;   /* Sığmazsa panel içinde kaydırma çubuğu çıksın */
+  }
+
+  /* Yazıları Ufaltalım */
+  h3 {
+    font-size: 14px;
+    margin-bottom: 5px;
+  }
+  
+  .status-badge {
+    font-size: 8px;
+    padding: 2px 4px;
+    margin-bottom: 5px;
+  }
+
+  /* Tabloyu Sıkıştıralım */
+  .data-table {
+    font-size: 9px;     /* Rakamlar daha küçük olsun */
+    margin: 5px 0;
+  }
+  .data-table th, .data-table td {
+    padding: 2px 0;
+  }
+
+  /* Butonları Kibarlaştıralım */
+  button {
+    padding: 8px;
+    font-size: 10px;
+  }
+
+  /* Login Ekranı Mobilde Taşmasın */
+  .login-box {
+    width: 80%;
+    padding: 20px;
+  }
+  .login-box h1 {
+    font-size: 18px;
+  }
+  .login-box input {
+    width: 100%;
+  }
+}
