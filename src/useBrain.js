@@ -22,13 +22,12 @@ export const useBrain = (architecture) => {
         inputShape: index === 1 ? [prevNeurons] : undefined,
         activation: index === architecture.length - 1 ? 'sigmoid' : 'relu',
         useBias: true,
-        // YENİ: Başlangıç ağırlıklarını biraz daha rastgele dağıt (He Normalization)
         kernelInitializer: 'heNormal' 
       }));
     });
 
+    // İlk derleme (Varsayılan hız ile)
     model.compile({ 
-      // GÜNCELLEME: Learning Rate'i 0.1'den 0.03'e çektik (Daha yavaş ama daha emin adımlarla öğrenir)
       optimizer: tf.train.adam(0.03), 
       loss: 'meanSquaredError' 
     });
@@ -61,32 +60,35 @@ export const useBrain = (architecture) => {
     predsTensor.dispose();
   };
 
-  const train = async () => {
+  // BURASI DEĞİŞTİ: Artık dışarıdan 'learningRate' alıyor
+  const train = async (learningRate = 0.03) => {
     if(!modelRef.current) return;
     setIsTraining(true);
 
     const xs = tf.tensor2d([[0,0], [0,1], [1,0], [1,1]]);
     const ys = tf.tensor2d([[0], [1], [1], [0]]); 
 
-    // GÜNCELLEME: Epoch sayısını 50'den 80'e çıkardık. Daha uzun süre deneyecek.
+    // Modeli seçilen hızla yeniden derle
+    modelRef.current.compile({ 
+      optimizer: tf.train.adam(parseFloat(learningRate)), 
+      loss: 'meanSquaredError' 
+    });
+
     for (let i = 0; i < 80; i++) { 
       const h = await modelRef.current.fit(xs, ys, {
-        epochs: 1, // Her döngüde 1 epoch
+        epochs: 1, 
         shuffle: true
       });
       
       setLoss(h.history.loss[0].toFixed(4));
       
-      // Animasyonu akıcı tutmak için her 2 adımda bir görseli güncelle (Performans artışı)
       if (i % 2 === 0) {
         await extractData(modelRef.current);
         await runPrediction(modelRef.current);
-        // Bekleme süresini azalttık, daha seri aksın
         await new Promise(r => setTimeout(r, 50)); 
       }
     }
     
-    // Bittiğinde son durumu kesin güncelle
     await extractData(modelRef.current);
     await runPrediction(modelRef.current);
 
