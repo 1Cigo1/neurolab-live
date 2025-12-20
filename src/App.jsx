@@ -5,7 +5,6 @@ import NeuralNetwork from './components/NeuralNetwork';
 import { useBrain } from './useBrain'; 
 import './App.css';
 import io from 'socket.io-client';
-import * as THREE from 'three';
 
 // ⚠️ LİNKİNİ KONTROL ET
 const SOCKET_URL = "https://neurolab-live-server.onrender.com"; 
@@ -71,15 +70,15 @@ function App() {
   const inputs = ["0, 0", "0, 1", "1, 0", "1, 1"];
   const targets = CHALLENGES[currentChallenge].targets;
 
-  // SKOR DEĞİŞİNCE YAYINLA
+  // SKOR YAYINI
   useEffect(() => {
     lossRef.current = loss;
-    if (room) {
-        // Null ise string yollama, 0.0000 yolla ki sıralama bozulmasın
-        const valToSend = loss ? loss : "0.0000"; 
+    if (isJoined && room) {
+        // Herkes duysun
+        const valToSend = loss ? loss : "Hazır";
         socket.emit("broadcast_loss", { room, loss: valToSend, userId: socket.id });
     }
-  }, [loss, room]);
+  }, [loss, room, isJoined]);
 
   const addLog = (msg) => { setSystemLogs(prev => [...prev.slice(-4), msg]); };
 
@@ -87,39 +86,40 @@ function App() {
   useEffect(() => { if(chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: "smooth" }); }, [chatMessages]);
 
   useEffect(() => {
-    socket.on("connect", () => setIsConnected(true));
-    socket.on("disconnect", () => setIsConnected(false));
+    socket.on("connect", () => { setIsConnected(true); console.log("Socket: BAĞLANDI"); });
+    socket.on("disconnect", () => { setIsConnected(false); console.log("Socket: KOPTU"); });
 
-    // ODAYA BİRİ GİRDİ
+    // ODAYA GİRİŞ & SKOR PAYLAŞIMI
     socket.on("user_joined_alert", (data) => {
-        addLog(`👤 User ${data.userId.substr(0,4)} geldi.`);
-        // Verileri paylaş
+        addLog(`👤 User ${data.userId.substr(0,4)} odaya girdi.`);
+        
+        // Yeni gelene elimizdeki haritayı verelim
         if(socket.id !== data.userId) {
             socket.emit("sync_architecture", { room, architecture: architectureRef.current });
             socket.emit("sync_dead_neurons", { room, deadNeurons: deadNeuronsRef.current });
         }
-        // Skoru paylaş
-        const myLoss = lossRef.current || "0.0000";
+        
+        // Skor paylaş
+        const myLoss = lossRef.current || "Hazır";
         socket.emit("broadcast_loss", { room, loss: myLoss, userId: socket.id });
     });
 
-    // VERİ YENİLEME İSTEĞİ (Herkes skorunu tekrar yollasın)
     socket.on("request_data_refresh", () => {
-        const myLoss = lossRef.current || "0.0000";
+        const myLoss = lossRef.current || "Hazır";
         socket.emit("broadcast_loss", { room, loss: myLoss, userId: socket.id });
     });
 
-    // LİSTE GÜNCELLE
     socket.on("update_leaderboard", (data) => {
+        console.log("Skor alındı:", data);
         setLeaderboard(prev => ({ ...prev, [data.userId]: data.loss }));
     });
 
-    // MESAJ AL
+    // MESAJ ALIMI
     socket.on("receive_message", (data) => {
+        console.log("Mesaj alındı:", data);
         setChatMessages(prev => [...prev, data]);
     });
 
-    // DİĞERLERİ
     socket.on("sync_architecture", (data) => setArchitecture(data));
     socket.on("sync_dead_neurons", (list) => setDeadNeurons(list));
     socket.on("sync_training_start", () => addLog("⚠️ Eğitim Başladı!"));
@@ -135,14 +135,15 @@ function App() {
         socket.off("user_joined_alert"); socket.off("request_data_refresh");
         socket.off("remote_cursor_move");
     };
-  }, [room]);
+  }, [room, isJoined]);
 
   const joinRoom = () => { 
       if (room.trim() !== "") { 
-          socket.emit("join_room", room.trim()); 
+          const cleanRoom = String(room).trim();
+          console.log("Odaya giriliyor:", cleanRoom);
+          socket.emit("join_room", cleanRoom); 
           setIsJoined(true); 
-          // Anında kendini listeye ekle
-          setLeaderboard(prev => ({ ...prev, [socket.id]: "0.0000" }));
+          setLeaderboard(prev => ({ ...prev, [socket.id]: "Hazır" }));
       } 
   };
 
@@ -164,7 +165,14 @@ function App() {
   };
 
   const handleMouseMove = (point) => { if (room) socket.emit("cursor_move", { room, position: [point.x, point.y, point.z] }); };
-  const sendMessage = () => { if (chatInput.trim() !== "") { socket.emit("send_message", { room, text: chatInput }); setChatInput(""); } };
+  
+  const sendMessage = () => { 
+      if (chatInput.trim() !== "") { 
+          console.log("Mesaj gönderiliyor:", chatInput);
+          socket.emit("send_message", { room, text: chatInput }); 
+          setChatInput(""); 
+      } 
+  };
 
   if (!isJoined) {
     return (
@@ -255,7 +263,7 @@ function App() {
              <div style={{ display: 'flex', gap: '5px' }}><button onClick={() => updateArchitecture([2, ...architecture.slice(1, -1), 4, 1])} disabled={isTraining} style={{ flex: 1, padding:'4px', background:'rgba(255,255,255,0.1)', border:'1px solid #333', color:'#fff', borderRadius:'4px', cursor:'pointer', fontSize:'10px' }}>+ KATMAN</button><button onClick={() => updateArchitecture([2, 4, 1])} disabled={isTraining} style={{ flex: 1, padding:'4px', background:'rgba(255,0,0,0.2)', border:'1px solid #333', color:'#fff', borderRadius:'4px', cursor:'pointer', fontSize:'10px' }}>SIFIRLA</button></div>
         </div>
 
-        {/* EN SAĞ: SOHBET (DÜZELTİLDİ: Mesajlar alt alta ve renkli) */}
+        {/* EN SAĞ: SOHBET (Düzeltildi) */}
         <div style={{ width: '25%', display: 'flex', flexDirection: 'column', gap: '5px', paddingLeft:'15px' }}>
             <div style={{fontSize:'12px', color:'#aaa', fontWeight:'bold'}}>TAKIM SOHBETİ</div>
             <div style={{ 
@@ -270,7 +278,7 @@ function App() {
                 gap:'8px',
                 minHeight: '100px'
             }}>
-                {chatMessages.length === 0 ? <div style={{color:'#555', fontStyle:'italic', textAlign:'center', marginTop:'10px'}}>Mesaj yok...</div> : null}
+                {chatMessages.length === 0 ? <div style={{color:'#555', fontStyle:'italic', textAlign:'center', marginTop:'10px'}}>Henüz mesaj yok...</div> : null}
                 {chatMessages.map((msg, idx) => {
                     const isMe = msg.userId === socket.id;
                     return (
