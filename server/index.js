@@ -4,31 +4,29 @@ const PORT = process.env.PORT || 3001;
 
 const io = new Server(PORT, {
   cors: {
-    origin: "*", // Her yerden bağlantıya izin ver
+    origin: "*", // Tüm dünyadan gelen bağlantıları kabul et
+    methods: ["GET", "POST"], // Veri alışverişine izin ver
+    allowedHeaders: ["my-custom-header"],
+    credentials: true
   }
 });
 
 console.log(`🚀 Backend Sunucusu ${PORT} portunda çalışıyor...`);
 
 io.on("connection", (socket) => {
-    console.log(`Yeni Bağlantı: ${socket.id}`);
+    console.log(`✅ YENİ KULLANICI BAĞLANDI: ${socket.id}`);
     
-    // --- ODAYA KATILMA ---
     socket.on("join_room", (room) => {
         socket.join(room);
-        console.log(`Kullanıcı ${socket.id}, ${room} odasına katıldı.`);
+        console.log(`🏠 ${socket.id} -> ${room} odasına girdi.`);
         
-        // 1. Odadakilere "Biri geldi" de
+        // Odadakilere haber ver
         socket.to(room).emit("user_joined");
-
-        // 2. YENİ EKLENEN KISIM: Odadaki herkesten skorlarını tekrar istiyoruz
-        // Böylece yeni gelen kişi boş liste görmeyecek.
         socket.to(room).emit("request_leaderboard_update");
     });
 
-    // --- MİMARİ VE EĞİTİM SENKRONİZASYONU ---
+    // --- SENKRONİZASYON ---
     socket.on("sync_architecture", (data) => {
-        // Gönderen hariç diğerlerine yolla
         socket.to(data.room).emit("sync_architecture", data.architecture);
     });
 
@@ -40,28 +38,24 @@ io.on("connection", (socket) => {
         socket.to(data.room).emit("sync_dead_neurons", data.deadNeurons);
     });
 
-    // --- SKOR TABLOSU (LİDERLİK) ---
     socket.on("broadcast_loss", (data) => {
-        // Herkesin skorunu diğerlerine yay
         socket.to(data.room).emit("update_leaderboard", { 
             userId: data.userId, 
             loss: data.loss 
         });
     });
 
-    // --- METAVERSE ÖZELLİKLERİ (İmleç & Sohbet) ---
-
-    // 1. MOUSE HAREKETİ
+    // --- MOUSE VE SOHBET ---
     socket.on("cursor_move", (data) => {
+        // Mouse hareketini sunucu konsoluna yazdırma (çok hızlı akar)
         socket.to(data.room).emit("remote_cursor_move", { 
             userId: socket.id, 
             position: data.position 
         });
     });
 
-    // 2. SOHBET MESAJI
     socket.on("send_message", (data) => {
-        // Mesajı odaya (gönderen dahil herkes) yay
+        console.log(`💬 Mesaj (${data.room}): ${data.text}`);
         io.in(data.room).emit("receive_message", {
             userId: socket.id,
             text: data.text,
@@ -69,11 +63,10 @@ io.on("connection", (socket) => {
         });
     });
 
-    // --- BAĞLANTI KOPMA ---
     socket.on("disconnecting", () => {
+        console.log(`❌ KULLANICI AYRILIYOR: ${socket.id}`);
         const rooms = [...socket.rooms];
         rooms.forEach((room) => {
-            // Odadakilere "Bu kişi çıktı, imlecini sil" de
             socket.to(room).emit("user_left", { userId: socket.id });
         });
     });
