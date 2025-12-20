@@ -3,41 +3,30 @@ const { Server } = require("socket.io");
 const PORT = process.env.PORT || 3001;
 
 const io = new Server(PORT, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
-  }
+  cors: { origin: "*", methods: ["GET", "POST"] }
 });
 
 console.log(`🚀 Sunucu ${PORT} portunda aktif!`);
 
 io.on("connection", (socket) => {
-    console.log(`Bağlandı: ${socket.id}`);
-
     socket.on("join_room", (room) => {
         socket.join(room);
-        console.log(`✅ ${socket.id} -> ${room} odasına girdi.`);
         
-        // Odaya birinin girdiğini HERKESE duyur
-        io.in(room).emit("user_joined_alert", { userId: socket.id });
-        
-        // Yeni gelen kişi için herkesten skorlarını tekrar istiyoruz
+        // Giren kişiye odadaki diğerlerinin skorlarını iste
         socket.to(room).emit("request_leaderboard_update");
+        
+        // Odadakilere yeni birinin geldiğini söyle
+        io.in(room).emit("user_joined_alert", { userId: socket.id });
     });
 
-    // --- SKOR TABLOSU ---
+    // SKOR YAYINI (Fix)
     socket.on("broadcast_loss", (data) => {
-        // Skoru odadaki HERKESE (gönderen dahil) yayıyoruz ki liste senkron olsun
-        io.in(data.room).emit("update_leaderboard", { 
-            userId: data.userId, 
-            loss: data.loss 
-        });
+        // Herkese yolla
+        io.in(data.room).emit("update_leaderboard", { userId: data.userId, loss: data.loss });
     });
 
-    // --- SOHBET (Fixlendi) ---
+    // SOHBET (Fix)
     socket.on("send_message", (data) => {
-        console.log(`Mesaj: ${data.text}`);
-        // Mesajı odadaki HERKESE gönder
         io.in(data.room).emit("receive_message", {
             userId: socket.id,
             text: data.text,
@@ -45,25 +34,14 @@ io.on("connection", (socket) => {
         });
     });
 
-    // --- MOUSE (Fixlendi) ---
-    socket.on("cursor_move", (data) => {
-        // Mouse hareketini sadece DİĞERLERİNE yolla (kendin zaten görüyorsun)
-        socket.to(data.room).emit("remote_cursor_move", { 
-            userId: socket.id, 
-            position: data.position 
-        });
-    });
-
-    // --- SENKRONİZASYON ---
-    socket.on("sync_architecture", (data) => socket.to(data.room).emit("sync_architecture", data.architecture));
-    socket.on("sync_dead_neurons", (data) => socket.to(data.room).emit("sync_dead_neurons", data.deadNeurons));
+    // DİĞERLERİ
+    socket.on("cursor_move", (d) => socket.to(d.room).emit("remote_cursor_move", { userId: socket.id, position: d.position }));
+    socket.on("sync_architecture", (d) => socket.to(d.room).emit("sync_architecture", d.architecture));
+    socket.on("sync_dead_neurons", (d) => socket.to(d.room).emit("sync_dead_neurons", d.deadNeurons));
     socket.on("sync_training_start", (room) => socket.to(room).emit("sync_training_start"));
-
+    
     socket.on("disconnecting", () => {
-        const rooms = [...socket.rooms];
-        rooms.forEach((room) => {
-            io.in(room).emit("user_left", { userId: socket.id });
-        });
+        [...socket.rooms].forEach(room => io.in(room).emit("user_left", { userId: socket.id }));
     });
 });
 

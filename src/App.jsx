@@ -7,8 +7,8 @@ import './App.css';
 import io from 'socket.io-client';
 import * as THREE from 'three';
 
-// ⚠️ RENDER LİNKİNİ BURAYA YAZ (Sonunda / olmasın)
-const SOCKET_URL = "https://neurolab-live-server.onrender.com"; 
+// ⚠️ KENDİ LİNKİNİ BURAYA YAZ!
+const SOCKET_URL = "https://neurolab-server-xyz.onrender.com"; 
 
 const socket = io.connect(SOCKET_URL); 
 
@@ -18,11 +18,11 @@ const CHALLENGES = {
   OR:  { name: "GÖREV: VEYA (OR)", targets: [0, 1, 1, 1] }
 };
 
-// --- YARDIMCI BİLEŞENLER ---
+// --- İMLEÇLER ---
 const RemoteCursors = ({ cursors }) => Object.entries(cursors).map(([userId, pos]) => (
     <group key={userId} position={pos}>
         <mesh><sphereGeometry args={[1.5, 16, 16]} /><meshBasicMaterial color="#ff00ff" /></mesh>
-        <Html distanceFactor={20} position={[0, 2, 0]}><div style={{background:'rgba(255,0,255,0.8)', color:'white', padding:'4px', borderRadius:'4px', fontSize:'10px'}}>User {userId.substr(0,4)}</div></Html>
+        <Html distanceFactor={25} position={[0, 3, 0]}><div style={{background:'rgba(255,0,255,0.8)', color:'white', padding:'2px 5px', borderRadius:'4px', fontSize:'10px'}}>User {userId.substr(0,4)}</div></Html>
     </group>
 ));
 
@@ -36,7 +36,7 @@ const MousePlane = ({ onMove }) => {
             if (intersects.length > 0) onMove(intersects[0].point);
         }
     });
-    return <mesh ref={planeRef} visible={false}><planeGeometry args={[2000, 2000]} /></mesh>;
+    return <mesh ref={planeRef} visible={false}><planeGeometry args={[5000, 5000]} /></mesh>;
 };
 
 function App() {
@@ -52,7 +52,7 @@ function App() {
   const [currentChallenge, setCurrentChallenge] = useState("XOR"); 
   const [leaderboard, setLeaderboard] = useState({}); 
 
-  const [systemLogs, setSystemLogs] = useState(["Sistem Hazır."]);
+  const [systemLogs, setSystemLogs] = useState(["Sistem Başlatılıyor..."]);
   const logsEndRef = useRef(null); 
 
   const [remoteCursors, setRemoteCursors] = useState({}); 
@@ -60,7 +60,6 @@ function App() {
   const [chatInput, setChatInput] = useState("");
   const chatEndRef = useRef(null);
 
-  // Veri kaybını önlemek için Ref'ler
   const architectureRef = useRef(architecture);
   const deadNeuronsRef = useRef(deadNeurons);
   const lossRef = useRef(null);
@@ -72,12 +71,13 @@ function App() {
   const inputs = ["0, 0", "0, 1", "1, 0", "1, 1"];
   const targets = CHALLENGES[currentChallenge].targets;
 
-  // Skor değiştiğinde
+  // SKOR YAYINI (ÖNEMLİ FIX)
   useEffect(() => {
     lossRef.current = loss;
-    if (loss && room) {
-        // broadcast_loss diyerek sunucuya atıyoruz, sunucu bize geri yollayacak (update_leaderboard)
-        socket.emit("broadcast_loss", { room, loss, userId: socket.id });
+    if (room) {
+        // loss null ise "Hazır" yolla, doluysa sayıyı yolla
+        const valToSend = loss ? loss : "Hazır";
+        socket.emit("broadcast_loss", { room, loss: valToSend, userId: socket.id });
     }
   }, [loss, room]);
 
@@ -86,61 +86,48 @@ function App() {
   useEffect(() => { if(logsEndRef.current) logsEndRef.current.scrollIntoView({ behavior: "smooth" }); }, [systemLogs]);
   useEffect(() => { if(chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: "smooth" }); }, [chatMessages]);
 
-  // --- SOCKET EVENTLERİ ---
   useEffect(() => {
-    socket.on("connect", () => { setIsConnected(true); console.log("Socket Bağlandı!"); });
+    socket.on("connect", () => setIsConnected(true));
     socket.on("disconnect", () => setIsConnected(false));
 
-    socket.on("sync_architecture", (data) => setArchitecture(data));
-    socket.on("sync_dead_neurons", (list) => setDeadNeurons(list));
-    socket.on("sync_training_start", () => addLog("⚠️ Biri eğitimi başlattı."));
-
-    // Odaya biri girince tetiklenir
     socket.on("user_joined_alert", (data) => {
-        addLog(`👤 User ${data.userId.substr(0,4)} katıldı.`);
-        // Yeni gelene elimizdeki her şeyi atalım
-        if(socket.id !== data.userId) { // Kendimiz değilse
-             socket.emit("sync_architecture", { room, architecture: architectureRef.current });
-             socket.emit("sync_dead_neurons", { room, deadNeurons: deadNeuronsRef.current });
-             if(lossRef.current) socket.emit("broadcast_loss", { room, loss: lossRef.current, userId: socket.id });
+        addLog(`👤 User ${data.userId.substr(0,4)} geldi.`);
+        if(socket.id !== data.userId) {
+            socket.emit("sync_architecture", { room, architecture: architectureRef.current });
+            socket.emit("sync_dead_neurons", { room, deadNeurons: deadNeuronsRef.current });
         }
+        // Kendimizi anında listeye ekleyelim
+        const myLoss = lossRef.current || "Hazır";
+        socket.emit("broadcast_loss", { room, loss: myLoss, userId: socket.id });
     });
 
-    // Biri bizden skor istiyor (Yeni gelen)
     socket.on("request_leaderboard_update", () => {
-         if(lossRef.current) socket.emit("broadcast_loss", { room, loss: lossRef.current, userId: socket.id });
+        const myLoss = lossRef.current || "Hazır";
+        socket.emit("broadcast_loss", { room, loss: myLoss, userId: socket.id });
     });
 
-    // SKOR GÜNCELLEME (En Kritik Yer)
     socket.on("update_leaderboard", (data) => {
-        console.log("Skor Güncellendi:", data);
-        setLeaderboard(prev => {
-            const newBoard = { ...prev, [data.userId]: data.loss };
-            return newBoard; 
-        });
+        setLeaderboard(prev => ({ ...prev, [data.userId]: data.loss }));
     });
 
-    // CHAT (Mesaj Alımı)
     socket.on("receive_message", (data) => {
-        console.log("Mesaj Geldi:", data);
         setChatMessages(prev => [...prev, data]);
     });
 
-    socket.on("remote_cursor_move", (data) => {
-        setRemoteCursors(prev => ({ ...prev, [data.userId]: data.position }));
-    });
-    
+    socket.on("sync_architecture", (data) => setArchitecture(data));
+    socket.on("sync_dead_neurons", (list) => setDeadNeurons(list));
+    socket.on("sync_training_start", () => addLog("⚠️ Eğitim Başladı!"));
+    socket.on("remote_cursor_move", (data) => setRemoteCursors(prev => ({ ...prev, [data.userId]: data.position })));
     socket.on("user_left", (data) => {
-        setRemoteCursors(prev => { const n = {...prev}; delete n[data.userId]; return n; });
-        addLog("👤 Bir kullanıcı ayrıldı.");
+        setRemoteCursors(prev => { const n={...prev}; delete n[data.userId]; return n; });
+        setLeaderboard(prev => { const n={...prev}; delete n[data.userId]; return n; });
+        addLog("👤 Biri ayrıldı.");
     });
 
     return () => {
-        socket.off("receive_message");
-        socket.off("update_leaderboard");
-        socket.off("user_joined_alert");
-        socket.off("request_leaderboard_update");
-        // Diğerlerini de temizlemek iyi olur ama en önemlileri bunlar
+        socket.off("receive_message"); socket.off("update_leaderboard"); 
+        socket.off("user_joined_alert"); socket.off("request_leaderboard_update");
+        socket.off("remote_cursor_move");
     };
   }, [room]);
 
@@ -148,6 +135,8 @@ function App() {
       if (room.trim() !== "") { 
           socket.emit("join_room", room.trim()); 
           setIsJoined(true); 
+          // Anında kendini listeye ekle
+          setLeaderboard(prev => ({ ...prev, [socket.id]: "Hazır" }));
       } 
   };
 
@@ -168,24 +157,17 @@ function App() {
     socket.emit("sync_dead_neurons", { room, deadNeurons: newDeadList });
   };
 
-  const handleMouseMove = (point) => { 
-      if (room) socket.emit("cursor_move", { room, position: [point.x, point.y, point.z] }); 
-  };
+  const handleMouseMove = (point) => { if (room) socket.emit("cursor_move", { room, position: [point.x, point.y, point.z] }); };
+  const sendMessage = () => { if (chatInput.trim() !== "") { socket.emit("send_message", { room, text: chatInput }); setChatInput(""); } };
 
-  const sendMessage = () => { 
-      if (chatInput.trim() !== "") { 
-          socket.emit("send_message", { room, text: chatInput }); 
-          setChatInput(""); 
-      } 
-  };
-
-  // --- GİRİŞ EKRANI ---
   if (!isJoined) {
     return (
       <div className="login-container">
         <div className="login-box">
           <h1>NEUROLAB PORTAL</h1>
-          <div style={{ color: isConnected ? '#00ff88' : '#ff0055', fontWeight: 'bold', marginBottom: '10px' }}>{isConnected ? "✅ SUNUCUYA BAĞLI" : "❌ SUNUCU ARANIYOR..."}</div>
+          <div style={{ color: isConnected ? '#00ff88' : '#ff0055', fontWeight: 'bold', marginBottom: '10px', border: '1px solid', padding:'5px', borderRadius:'4px' }}>
+             {isConnected ? "✅ SUNUCUYA BAĞLI" : "❌ BAĞLANTI YOK (Linkini Kontrol Et)"}
+          </div>
           <input type="text" placeholder="ODA NO (Örn: 101)" onChange={(e) => setRoom(e.target.value)} onKeyPress={(e) => e.key === "Enter" && joinRoom()}/>
           <button onClick={joinRoom} disabled={!isConnected}>SUNUCUYA BAĞLAN</button>
         </div>
@@ -194,7 +176,6 @@ function App() {
     );
   }
 
-  // --- ANA EKRAN ---
   return (
     <div style={{ width: "100vw", height: "100vh", background: "#050b14", position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       
@@ -204,7 +185,7 @@ function App() {
           <div className="status-badge connected" style={{fontSize: '11px', padding: '4px 10px', borderRadius:'12px', background: isConnected ? 'rgba(0,255,136,0.1)' : 'rgba(255,0,0,0.2)', border: isConnected ? '1px solid var(--neon-green)' : '1px solid red'}}>ODA: {room} ● {isConnected ? "ONLINE" : "OFFLINE"}</div>
       </div>
 
-      {/* 3D ALAN */}
+      {/* 3D SAHNE */}
       <div style={{ flex: 1, position: 'relative' }}>
           <Canvas camera={{ position: [0, 0, 120], fov: 60 }}> 
             <color attach="background" args={['#050b14']} />
@@ -224,7 +205,7 @@ function App() {
           </div>
       </div>
 
-      {/* ALT PANEL (240px) */}
+      {/* ALT PANEL */}
       <div style={{ height: '240px', background: 'rgba(10, 15, 30, 0.95)', backdropFilter: 'blur(15px)', borderTop: '1px solid rgba(0, 255, 136, 0.3)', display: 'flex', justifyContent: 'space-between', padding: '15px 20px', boxShadow: '0 -10px 40px rgba(0,0,0,0.5)', zIndex: 20 }}>
         
         {/* SOL: EĞİTİM */}
@@ -254,27 +235,58 @@ function App() {
              <div style={{fontSize:'12px', color:'#aaa', fontWeight:'bold'}}>SKOR TABLOSU</div>
              <div style={{ flex:1, background: 'rgba(0,0,0,0.3)', padding: '5px', borderRadius: '4px', overflowY: 'auto' }}>
                 {Object.keys(leaderboard).length === 0 ? <div style={{fontSize:'10px', color:'#666'}}>Veri bekleniyor...</div> : null}
-                {Object.entries(leaderboard).sort(([, a], [, b]) => parseFloat(a) - parseFloat(b)).map(([user, score]) => (
+                {Object.entries(leaderboard).sort(([, a], [, b]) => {
+                     // "Hazır" yazanları en alta, sayıları en üste (küçükten büyüğe)
+                     const numA = parseFloat(a); const numB = parseFloat(b);
+                     if (isNaN(numA)) return 1; if (isNaN(numB)) return -1;
+                     return numA - numB;
+                }).map(([user, score]) => (
                     <div key={user} style={{ display: 'flex', justifyContent: 'space-between', fontSize:'11px', marginBottom:'2px' }}>
-                        <span style={{ color: user === socket.id ? '#fff' : '#888', fontWeight: user === socket.id ? 'bold' : 'normal' }}>{user === socket.id ? ">> SEN" : `User ${user.substr(0,4)}`}</span>
-                        <span style={{ color: user === socket.id ? 'var(--neon-green)' : '#aaa', fontFamily: 'monospace' }}>{score}</span>
+                        <span style={{ color: user === socket.id ? '#fff' : '#888', fontWeight: user === socket.id ? 'bold' : 'normal' }}>
+                            {user === socket.id ? "User BEN" : `User ${user.substr(0,4)}`}
+                        </span>
+                        <span style={{ color: user === socket.id ? 'var(--neon-green)' : '#aaa', fontFamily: 'monospace' }}>
+                            {score}
+                        </span>
                     </div>
                 ))}
              </div>
              <div style={{ display: 'flex', gap: '5px' }}><button onClick={() => updateArchitecture([2, ...architecture.slice(1, -1), 4, 1])} disabled={isTraining} style={{ flex: 1, padding:'4px', background:'rgba(255,255,255,0.1)', border:'1px solid #333', color:'#fff', borderRadius:'4px', cursor:'pointer', fontSize:'10px' }}>+ KATMAN</button><button onClick={() => updateArchitecture([2, 4, 1])} disabled={isTraining} style={{ flex: 1, padding:'4px', background:'rgba(255,0,0,0.2)', border:'1px solid #333', color:'#fff', borderRadius:'4px', cursor:'pointer', fontSize:'10px' }}>SIFIRLA</button></div>
         </div>
 
-        {/* EN SAĞ: SOHBET */}
+        {/* EN SAĞ: WHATSAPP SOHBETİ */}
         <div style={{ width: '25%', display: 'flex', flexDirection: 'column', gap: '5px', paddingLeft:'15px' }}>
             <div style={{fontSize:'12px', color:'#aaa', fontWeight:'bold'}}>TAKIM SOHBETİ</div>
-            <div style={{ flex: 1, background:'rgba(0,0,0,0.6)', border:'1px solid #333', borderRadius:'4px', padding:'5px', overflowY:'auto', fontSize:'11px', fontFamily:'monospace', minHeight: '100px' }}>
-                {chatMessages.length === 0 ? <div style={{color:'#555', fontStyle:'italic', padding:'5px'}}>Mesaj yok...</div> : null}
-                {chatMessages.map((msg, idx) => (<div key={idx} style={{ marginBottom:'4px', wordBreak: 'break-all' }}><span style={{color:'#888'}}> [{msg.time}] </span><span style={{color: msg.userId === socket.id ? 'var(--neon-blue)' : '#ff00ff' }}>{msg.userId === socket.id ? 'SEN' : `User ${msg.userId.substr(0,3)}`}</span>: <span style={{color:'#ddd'}}>{msg.text}</span></div>))}
+            <div style={{ flex: 1, background:'rgba(0,0,0,0.2)', border:'1px solid #333', borderRadius:'4px', padding:'10px', overflowY:'auto', display:'flex', flexDirection:'column', gap:'8px' }}>
+                {chatMessages.length === 0 ? <div style={{color:'#555', fontStyle:'italic', padding:'5px', textAlign:'center'}}>Henüz mesaj yok...</div> : null}
+                {chatMessages.map((msg, idx) => {
+                    const isMe = msg.userId === socket.id;
+                    return (
+                        <div key={idx} style={{
+                            alignSelf: isMe ? 'flex-end' : 'flex-start',
+                            background: isMe ? '#005c4b' : '#202c33', // WhatsApp Yeşili & Grisi
+                            color: '#e9edef',
+                            padding: '6px 10px',
+                            borderRadius: '8px',
+                            borderTopRightRadius: isMe ? '0px' : '8px',
+                            borderTopLeftRadius: isMe ? '8px' : '0px',
+                            maxWidth: '85%',
+                            fontSize: '12px',
+                            boxShadow: '0 1px 2px rgba(0,0,0,0.3)',
+                            position: 'relative',
+                            fontFamily: 'sans-serif'
+                        }}>
+                            {!isMe && <div style={{fontSize:'9px', color:'#00ff88', marginBottom:'2px', fontWeight:'bold'}}>User {msg.userId.substr(0,4)}</div>}
+                            <div style={{wordBreak: 'break-word'}}>{msg.text}</div>
+                            <div style={{fontSize:'9px', color:'rgba(255,255,255,0.6)', textAlign:'right', marginTop:'2px', marginLeft:'10px'}}>{msg.time}</div>
+                        </div>
+                    );
+                })}
                 <div ref={chatEndRef} />
             </div>
             <div style={{ display:'flex', gap:'5px', marginTop:'auto' }}>
-                <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && sendMessage()} placeholder="Mesaj yaz..." style={{ flex:1, background:'#111', border:'1px solid #333', color:'#fff', fontSize:'11px', padding:'8px', borderRadius:'2px' }}/>
-                <button onClick={sendMessage} style={{ background:'var(--neon-green)', color:'#000', border:'none', padding:'0 15px', borderRadius:'2px', cursor:'pointer', fontWeight:'bold' }}>➔</button>
+                <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && sendMessage()} placeholder="Mesaj yaz..." style={{ flex:1, background:'#202c33', border:'none', color:'#fff', fontSize:'12px', padding:'10px', borderRadius:'20px', paddingLeft:'15px' }}/>
+                <button onClick={sendMessage} style={{ background:'#00a884', color:'#fff', border:'none', width:'35px', height:'35px', borderRadius:'50%', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:'bold' }}>➔</button>
             </div>
         </div>
 
