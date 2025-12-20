@@ -8,7 +8,7 @@ import io from 'socket.io-client';
 import * as THREE from 'three';
 
 // ⚠️ KENDİ LİNKİNİ BURAYA YAZ!
-const SOCKET_URL = "https://neurolab-server-xyz.onrender.com"; 
+const SOCKET_URL = "https://neurolab-live-server.onrender.com"; 
 
 const socket = io.connect(SOCKET_URL); 
 
