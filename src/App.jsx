@@ -8,7 +8,7 @@ import io from 'socket.io-client';
 import * as THREE from 'three';
 
 // SOCKET LİNKİN (Render)
-const socket = io.connect("https://neurolab-server-xyz.onrender.com"); 
+const socket = io.connect("https://neurolab-live-server.onrender.com"); 
 
 const CHALLENGES = {
   XOR: { name: "GÖREV: XOR (ZOR)", targets: [0, 1, 1, 0] },
