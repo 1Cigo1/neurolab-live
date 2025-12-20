@@ -4,20 +4,31 @@ const PORT = process.env.PORT || 3001;
 
 const io = new Server(PORT, {
   cors: {
-    origin: "*",
+    origin: "*", // Her yerden bağlantıya izin ver
   }
 });
 
 console.log(`🚀 Backend Sunucusu ${PORT} portunda çalışıyor...`);
 
 io.on("connection", (socket) => {
-    // --- MEVCUT KODLAR ---
+    console.log(`Yeni Bağlantı: ${socket.id}`);
+    
+    // --- ODAYA KATILMA ---
     socket.on("join_room", (room) => {
         socket.join(room);
+        console.log(`Kullanıcı ${socket.id}, ${room} odasına katıldı.`);
+        
+        // 1. Odadakilere "Biri geldi" de
         socket.to(room).emit("user_joined");
+
+        // 2. YENİ EKLENEN KISIM: Odadaki herkesten skorlarını tekrar istiyoruz
+        // Böylece yeni gelen kişi boş liste görmeyecek.
+        socket.to(room).emit("request_leaderboard_update");
     });
 
+    // --- MİMARİ VE EĞİTİM SENKRONİZASYONU ---
     socket.on("sync_architecture", (data) => {
+        // Gönderen hariç diğerlerine yolla
         socket.to(data.room).emit("sync_architecture", data.architecture);
     });
 
@@ -29,15 +40,19 @@ io.on("connection", (socket) => {
         socket.to(data.room).emit("sync_dead_neurons", data.deadNeurons);
     });
 
+    // --- SKOR TABLOSU (LİDERLİK) ---
     socket.on("broadcast_loss", (data) => {
-        socket.to(data.room).emit("update_leaderboard", { userId: data.userId, loss: data.loss });
+        // Herkesin skorunu diğerlerine yay
+        socket.to(data.room).emit("update_leaderboard", { 
+            userId: data.userId, 
+            loss: data.loss 
+        });
     });
 
-    // --- YENİ EKLENENLER (ETKİLEŞİM) ---
+    // --- METAVERSE ÖZELLİKLERİ (İmleç & Sohbet) ---
 
-    // 1. MOUSE HAREKETİ (Hafif olması için sadece koordinat yollar)
+    // 1. MOUSE HAREKETİ
     socket.on("cursor_move", (data) => {
-        // Gönderen hariç herkese yolla
         socket.to(data.room).emit("remote_cursor_move", { 
             userId: socket.id, 
             position: data.position 
@@ -46,6 +61,7 @@ io.on("connection", (socket) => {
 
     // 2. SOHBET MESAJI
     socket.on("send_message", (data) => {
+        // Mesajı odaya (gönderen dahil herkes) yay
         io.in(data.room).emit("receive_message", {
             userId: socket.id,
             text: data.text,
@@ -53,10 +69,11 @@ io.on("connection", (socket) => {
         });
     });
 
-    // Kullanıcı çıkarsa imleci silmek için haber ver
+    // --- BAĞLANTI KOPMA ---
     socket.on("disconnecting", () => {
         const rooms = [...socket.rooms];
         rooms.forEach((room) => {
+            // Odadakilere "Bu kişi çıktı, imlecini sil" de
             socket.to(room).emit("user_left", { userId: socket.id });
         });
     });

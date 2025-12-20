@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Canvas, useFrame } from '@react-three/fiber';
+import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, Stars, Html } from '@react-three/drei';
 import NeuralNetwork from './components/NeuralNetwork';
 import { useBrain } from './useBrain'; 
@@ -8,7 +8,7 @@ import io from 'socket.io-client';
 import * as THREE from 'three';
 
 // SOCKET LİNKİN (Render)
-const socket = io.connect("https://neurolab-live-server.onrender.com"); 
+const socket = io.connect("https://neurolab-server-xyz.onrender.com"); 
 
 const CHALLENGES = {
   XOR: { name: "GÖREV: XOR (ZOR)", targets: [0, 1, 1, 0] },
@@ -16,25 +16,25 @@ const CHALLENGES = {
   OR:  { name: "GÖREV: VEYA (OR)", targets: [0, 1, 1, 1] }
 };
 
-// --- YENİ BİLEŞEN: DİĞER KULLANICILARIN İMLEÇLERİ (3D) ---
+// --- DİĞER KULLANICILARIN İMLEÇLERİ ---
 const RemoteCursors = ({ cursors }) => {
     return Object.entries(cursors).map(([userId, pos]) => (
         <group key={userId} position={pos}>
-            {/* İmleç Işığı */}
             <mesh>
-                <sphereGeometry args={[0.8, 16, 16]} />
+                <sphereGeometry args={[1.5, 16, 16]} /> {/* İmleci büyüttüm */}
                 <meshBasicMaterial color="#ff00ff" />
             </mesh>
-            {/* Kullanıcı Adı Etiketi */}
-            <Html distanceFactor={15}>
+            <Html distanceFactor={20} position={[0, 2, 0]}>
                 <div style={{
-                    background: 'rgba(255, 0, 255, 0.5)', 
+                    background: 'rgba(255, 0, 255, 0.6)', 
                     color: 'white', 
-                    padding: '2px 5px', 
+                    padding: '4px 8px', 
                     borderRadius: '4px',
-                    fontSize: '10px',
+                    fontSize: '12px',
+                    fontWeight: 'bold',
                     fontFamily: 'monospace',
-                    whiteSpace: 'nowrap'
+                    whiteSpace: 'nowrap',
+                    border: '1px solid #fff'
                 }}>
                     User {userId.substr(0,4)}
                 </div>
@@ -43,16 +43,30 @@ const RemoteCursors = ({ cursors }) => {
     ));
 };
 
-// --- MOUSE TAKİPÇİSİ (Görünmez Düzlem) ---
-const MouseTracker = ({ onMove }) => {
-    // Uzayda görünmez bir duvar oluşturup mouse'un çarptığı yeri buluyoruz
+// --- AKILLI MOUSE TAKİPÇİSİ (RAYCASTER) ---
+// Bu bileşen, mouse'un 3D dünyada nereye değdiğini hesaplar
+const MousePlane = ({ onMove }) => {
+    const { camera, raycaster, mouse } = useThree();
+    const planeRef = useRef();
+
+    useFrame(() => {
+        if (planeRef.current) {
+            // Görünmez bir düzlemle (Z=0 düzlemi) kesişimi bul
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(planeRef.current);
+            if (intersects.length > 0) {
+                const point = intersects[0].point;
+                onMove(point);
+            }
+        }
+    });
+
     return (
-        <mesh visible={false} onPointerMove={(e) => onMove(e.point)}>
-            <planeGeometry args={[500, 500]} />
+        <mesh ref={planeRef} visible={false} position={[0, 0, 0]} rotation={[0, 0, 0]}>
+            <planeGeometry args={[1000, 1000]} /> {/* Devasa görünmez duvar */}
         </mesh>
     );
 };
-
 
 function App() {
   const [room, setRoom] = useState(""); 
@@ -68,14 +82,14 @@ function App() {
   const [systemLogs, setSystemLogs] = useState(["Sistem Hazır."]);
   const logsEndRef = useRef(null); 
 
-  // --- YENİ STATE'LER ---
-  const [remoteCursors, setRemoteCursors] = useState({}); // { 'socketId': [x,y,z] }
+  const [remoteCursors, setRemoteCursors] = useState({}); 
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState("");
   const chatEndRef = useRef(null);
 
   const architectureRef = useRef(architecture);
   const deadNeuronsRef = useRef(deadNeurons);
+  const lossRef = useRef(null); // Skor paylaşımı için ref
 
   useEffect(() => { architectureRef.current = architecture; }, [architecture]);
   useEffect(() => { deadNeuronsRef.current = deadNeurons; }, [deadNeurons]);
@@ -83,6 +97,11 @@ function App() {
   const { weights, loss, isTraining, predictions, train } = useBrain(architecture);
   const inputs = ["0, 0", "0, 1", "1, 0", "1, 1"];
   const targets = CHALLENGES[currentChallenge].targets;
+
+  // Loss state'ini ref'e bağla (Socket içinde kullanmak için)
+  useEffect(() => {
+    lossRef.current = loss;
+  }, [loss]);
 
   const addLog = (msg) => {
     setSystemLogs(prev => [...prev.slice(-4), msg]); 
@@ -92,6 +111,8 @@ function App() {
   useEffect(() => { if(chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: "smooth" }); }, [chatMessages]);
 
   useEffect(() => {
+    // --- SOCKET DİNLEYİCİLERİ ---
+    
     socket.on("sync_architecture", (data) => {
       const cleanArchitecture = Array.isArray(data) ? data : data.architecture;
       if (cleanArchitecture && Array.isArray(cleanArchitecture)) setArchitecture(cleanArchitecture);
@@ -103,15 +124,22 @@ function App() {
 
     socket.on("user_joined", () => {
         if (room) {
+            // 1. Mimarini yolla
             socket.emit("sync_architecture", { room, architecture: architectureRef.current });
             socket.emit("sync_dead_neurons", { room, deadNeurons: deadNeuronsRef.current });
             addLog("👤 Odaya yeni kullanıcı katıldı.");
+            
+            // 2. SKORUNU TEKRAR YAYINLA (Çünkü yeni gelen bilmiyor)
+            if(lossRef.current) {
+                socket.emit("broadcast_loss", { room, loss: lossRef.current, userId: socket.id });
+            }
         }
     });
 
-    socket.on("update_leaderboard", (data) => setLeaderboard(prev => ({ ...prev, [data.userId]: data.loss })));
+    socket.on("update_leaderboard", (data) => {
+        setLeaderboard(prev => ({ ...prev, [data.userId]: data.loss }));
+    });
 
-    // --- YENİ SOCKET DİNLEYİCİLERİ ---
     socket.on("remote_cursor_move", (data) => {
         setRemoteCursors(prev => ({ ...prev, [data.userId]: data.position }));
     });
@@ -169,10 +197,8 @@ function App() {
     socket.emit("sync_dead_neurons", { room, deadNeurons: newDeadList });
   };
 
-  // 3D Alanda Mouse Hareketi
   const handleMouseMove = (point) => {
       if (room) {
-          // Performans için her hareketi yollama (throttle yapılabilir ama şimdilik böyle kalsın)
           socket.emit("cursor_move", { room, position: [point.x, point.y, point.z] });
       }
   };
@@ -207,7 +233,7 @@ function App() {
   return (
     <div style={{ width: "100vw", height: "100vh", background: "#050b14", position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       
-      {/* 1. ÜST BİLGİ ÇUBUĞU */}
+      {/* 1. ÜST BİLGİ */}
       <div style={{
           position: 'absolute', top: 0, left: 0, right: 0, height: '40px',
           background: 'linear-gradient(180deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%)',
@@ -231,10 +257,9 @@ function App() {
             <pointLight position={[-100, -100, -100]} intensity={3.0} color="#00aaff" distance={1000} />
             <Stars radius={300} depth={100} count={10000} factor={7} saturation={0} fade />
             
-            {/* Mouse Hareketini Algılayan Görünmez Duvar */}
-            <MouseTracker onMove={handleMouseMove} />
+            {/* AKILLI MOUSE TAKİPÇİSİ (Düzeltildi) */}
+            <MousePlane onMove={handleMouseMove} />
             
-            {/* Diğer Kullanıcıların İmleçleri (Pembe Işıklar) */}
             <RemoteCursors cursors={remoteCursors} />
 
             <NeuralNetwork 
@@ -248,7 +273,7 @@ function App() {
             <OrbitControls enablePan={true} minDistance={10} maxDistance={600} autoRotate={true} autoRotateSpeed={0.5} />
           </Canvas>
 
-          {/* SİSTEM TERMİNALİ (Sol Üst) */}
+          {/* TERMİNAL */}
           <div style={{ 
               position: 'absolute', top: '50px', left: '20px',
               background: 'rgba(0,0,0,0.6)', padding: '10px', borderRadius: '4px',
@@ -263,10 +288,10 @@ function App() {
           </div>
       </div>
 
-      {/* 3. KOKPİT PANELİ */}
+      {/* 3. KOKPİT PANELİ (Alt Şerit - Düzeltildi) */}
       <div style={{
-          height: '180px', 
-          background: 'rgba(10, 15, 30, 0.85)',
+          height: '200px', // Yüksekliği biraz artırdım ki sığsın
+          background: 'rgba(10, 15, 30, 0.9)', // Daha koyu zemin
           backdropFilter: 'blur(15px)',
           borderTop: '1px solid rgba(0, 255, 136, 0.3)',
           display: 'flex',
@@ -289,18 +314,27 @@ function App() {
             </button>
         </div>
 
-        {/* ORTA: TABLO */}
-        <div style={{ width: '25%', display: 'flex', gap: '15px', paddingLeft:'15px', borderRight:'1px solid rgba(255,255,255,0.1)', paddingRight:'15px' }}>
-             <div style={{ flex: 1, overflowY:'auto' }}>
-                <table className="data-table" style={{width:'100%', fontSize:'11px', borderCollapse:'collapse'}}>
+        {/* ORTA: TABLO & MANUEL */}
+        <div style={{ width: '35%', display: 'flex', gap: '15px', paddingLeft:'15px', borderRight:'1px solid rgba(255,255,255,0.1)', paddingRight:'15px' }}>
+            <div style={{ flex: 2, overflowY:'auto' }}>
+                <table className="data-table" style={{width:'100%', fontSize:'10px', borderCollapse:'collapse'}}>
                   <thead><tr style={{color:'#888', borderBottom:'1px solid #333'}}><th style={{textAlign:'left'}}>GİRİŞ</th><th style={{textAlign:'center'}}>HEDEF</th><th style={{textAlign:'right'}}>SONUÇ</th></tr></thead>
                   <tbody>{inputs.map((inp, i) => { const val = predictions[i] || 0; const isCorrect = Math.abs(targets[i] - val) < 0.5; return ( <tr key={i} style={{borderBottom:'1px solid rgba(255,255,255,0.05)'}}><td style={{fontFamily: 'monospace', color:'#ccc'}}>[{inp}]</td><td style={{textAlign:'center', color:'#ccc'}}>{targets[i]}</td><td style={{textAlign:'right', color: isCorrect?'var(--neon-green)':'var(--neon-red)', fontWeight: 'bold'}}>{val?val.toFixed(4):'---'}</td></tr>)})}</tbody>
                 </table>
             </div>
+            <div style={{ flex: 1, display:'flex', flexDirection:'column', gap:'5px' }}>
+                <div style={{fontSize:'10px', color:'#aaa', fontWeight:'bold', textAlign:'center'}}>MANUEL</div>
+                <button onClick={() => setManualInput([manualInput[0]===0?1:0, manualInput[1]])} style={{ padding:'6px', background: manualInput[0] ? 'var(--neon-green)' : 'rgba(255,255,255,0.1)', color: manualInput[0]?'#000':'#ccc', border:'none', borderRadius:'4px', cursor:'pointer', fontSize:'10px' }}>GİRİŞ A</button>
+                <button onClick={() => setManualInput([manualInput[0], manualInput[1]===0?1:0])} style={{ padding:'6px', background: manualInput[1] ? 'var(--neon-green)' : 'rgba(255,255,255,0.1)', color: manualInput[1]?'#000':'#ccc', border:'none', borderRadius:'4px', cursor:'pointer', fontSize:'10px' }}>GİRİŞ B</button>
+                <div style={{ textAlign:'center', marginTop:'auto', background:'#000', padding:'5px', borderRadius:'4px' }}>
+                    <div style={{fontSize:'9px', color:'#888'}}>TAHMİN</div>
+                    <strong style={{color:'var(--neon-blue)', fontSize:'14px'}}>{(() => { const idx = (manualInput[0] * 2) + manualInput[1]; return predictions[idx] ? predictions[idx].toFixed(4) : '---'; })()}</strong>
+                </div>
+            </div>
         </div>
 
-        {/* SAĞ ORTA: SKOR & MİMARİ */}
-        <div style={{ width: '25%', display: 'flex', flexDirection: 'column', gap: '8px', paddingLeft:'15px', borderRight:'1px solid rgba(255,255,255,0.1)', paddingRight:'15px' }}>
+        {/* SAĞ ORTA: SKOR */}
+        <div style={{ width: '20%', display: 'flex', flexDirection: 'column', gap: '8px', paddingLeft:'15px', borderRight:'1px solid rgba(255,255,255,0.1)', paddingRight:'15px' }}>
              <div style={{fontSize:'10px', color:'#aaa', fontWeight:'bold'}}>SKOR TABLOSU</div>
              <div style={{ flex:1, background: 'rgba(0,0,0,0.3)', padding: '5px', borderRadius: '4px', overflowY: 'auto' }}>
                 {Object.entries(leaderboard).sort(([, a], [, b]) => parseFloat(a) - parseFloat(b)).map(([user, score]) => (
@@ -316,13 +350,23 @@ function App() {
              </div>
         </div>
 
-        {/* EN SAĞ: SOHBET (YENİ) */}
-        <div style={{ width: '30%', display: 'flex', flexDirection: 'column', gap: '5px', paddingLeft:'15px' }}>
+        {/* EN SAĞ: SOHBET (Düzeltildi) */}
+        <div style={{ width: '25%', display: 'flex', flexDirection: 'column', gap: '5px', paddingLeft:'15px' }}>
             <div style={{fontSize:'10px', color:'#aaa', fontWeight:'bold'}}>TAKIM SOHBETİ</div>
-            <div style={{ flex: 1, background:'rgba(0,0,0,0.6)', border:'1px solid #333', borderRadius:'4px', padding:'5px', overflowY:'auto', fontSize:'10px', fontFamily:'monospace' }}>
+            <div style={{ 
+                flex: 1, 
+                background:'rgba(0,0,0,0.6)', 
+                border:'1px solid #333', 
+                borderRadius:'4px', 
+                padding:'5px', 
+                overflowY:'auto', 
+                fontSize:'10px', 
+                fontFamily:'monospace',
+                minHeight: '80px' // Yükseklik garantisi
+            }}>
                 {chatMessages.length === 0 ? <div style={{color:'#555', fontStyle:'italic'}}>Mesaj yok...</div> : null}
                 {chatMessages.map((msg, idx) => (
-                    <div key={idx} style={{ marginBottom:'4px' }}>
+                    <div key={idx} style={{ marginBottom:'4px', wordBreak: 'break-all' }}>
                         <span style={{color:'#888'}}> [{msg.time}] </span>
                         <span style={{color: msg.userId === socket.id ? 'var(--neon-blue)' : '#ff00ff' }}>
                              {msg.userId === socket.id ? 'SEN' : `User ${msg.userId.substr(0,3)}`}
@@ -331,16 +375,16 @@ function App() {
                 ))}
                 <div ref={chatEndRef} />
             </div>
-            <div style={{ display:'flex', gap:'5px' }}>
+            <div style={{ display:'flex', gap:'5px', marginTop:'auto' }}>
                 <input 
                     type="text" 
                     value={chatInput}
                     onChange={(e) => setChatInput(e.target.value)}
                     onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
                     placeholder="Mesaj yaz..." 
-                    style={{ flex:1, background:'#111', border:'1px solid #333', color:'#fff', fontSize:'11px', padding:'4px' }}
+                    style={{ flex:1, background:'#111', border:'1px solid #333', color:'#fff', fontSize:'11px', padding:'6px', borderRadius:'2px' }}
                 />
-                <button onClick={sendMessage} style={{ background:'var(--neon-green)', color:'#000', border:'none', padding:'0 10px', borderRadius:'2px', cursor:'pointer', fontWeight:'bold' }}>➔</button>
+                <button onClick={sendMessage} style={{ background:'var(--neon-green)', color:'#000', border:'none', padding:'0 12px', borderRadius:'2px', cursor:'pointer', fontWeight:'bold' }}>➔</button>
             </div>
         </div>
 
