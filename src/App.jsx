@@ -5,15 +5,13 @@ import NeuralNetwork from './components/NeuralNetwork';
 import './App.css';
 import io from 'socket.io-client';
 
-// ⚠️ BURAYA KENDİ RENDER LİNKİNİ YAPIŞTIR!
-// Örnek: "https://neurolab-server-benimki.onrender.com"
+// ⚠️ DİKKAT: BURAYA KENDİ RENDER LİNKİNİ YAPIŞTIR (Sonunda / olmasın)
+// Örnek: "https://neurolab-server-xyz.onrender.com"
 const SOCKET_URL = "https://neurolab-live-server.onrender.com"; 
 
 const socket = io.connect(SOCKET_URL); 
 
-// ... (Geri kalan kodların hepsi AYNI, sadece yukarıdaki linki değiştirmen yeterli)
-// ... Kodun geri kalanını silmene gerek yok, sadece üstteki SOCKET_URL satırını güncelle.
-
+// --- OYUN SINIFLARI ---
 const CLASSES = {
     STRIKER: { name: "SALDIRGAN", hp: 100, atk: 25, def: 0, color: "#ff0055", icon: "⚔️", desc: "Yüksek Hasar" },
     TANK:    { name: "KALKAN",    hp: 200, atk: 10, def: 30, color: "#ffff00", icon: "🛡️", desc: "Yüksek Defans" },
@@ -42,12 +40,12 @@ const RemoteCursors = ({ cursors }) => Object.entries(cursors).map(([userId, pos
 ));
 
 function App() {
+  // --- STATE ---
   const [room, setRoom] = useState(""); 
   const [selectedClass, setSelectedClass] = useState("STRIKER");
   const [isJoined, setIsJoined] = useState(false);
   const [isConnected, setIsConnected] = useState(socket.connected);
 
-  // İstatistikler
   const [hp, setHp] = useState(100);
   const [maxHp, setMaxHp] = useState(100);
   const [shield, setShield] = useState(0);
@@ -55,7 +53,6 @@ function App() {
   const [aiLevel, setAiLevel] = useState(1);
   const [isDead, setIsDead] = useState(false);
 
-  // Efektler
   const [isUnderAttack, setIsUnderAttack] = useState(false);
   const [attackCooldown, setAttackCooldown] = useState(false);
   const [players, setPlayers] = useState({}); 
@@ -66,24 +63,24 @@ function App() {
   const addLog = (msg) => { setSystemLogs(prev => [...prev.slice(-5), msg]); };
   useEffect(() => { if(logsEndRef.current) logsEndRef.current.scrollIntoView({ behavior: "smooth" }); }, [systemLogs]);
 
-  // MİMARİ: Seviye arttıkça hacimsel olarak büyür
+  // --- MİMARİ HESAPLAMA (Seviyeye Göre Büyüyen Beyin) ---
   const architecture = useMemo(() => {
       const base = [3, 5, 2]; 
-      if(aiLevel >= 2) base[1] += 5;       // 10 Nöron
-      if(aiLevel >= 3) base.splice(1, 0, 8); // Yeni katman (8 nöron)
-      if(aiLevel >= 4) base[2] += 6;       
+      if(aiLevel >= 2) base[1] += 5;
+      if(aiLevel >= 3) base.splice(1, 0, 8);
+      if(aiLevel >= 4) base[2] += 6;
       if(aiLevel >= 5) base.push(4);
-      if(aiLevel >= 6) base.splice(2, 0, 12); // Devasa orta katman
+      if(aiLevel >= 6) base.splice(2, 0, 12);
       return base;
   }, [aiLevel]);
 
-  // SOCKET EVENTS
+  // --- SOCKET DİNLEYİCİLERİ ---
   useEffect(() => {
-    socket.on("connect", () => { setIsConnected(true); addLog("✅ BAĞLANDI (Localhost)"); });
+    socket.on("connect", () => { setIsConnected(true); addLog("✅ SUNUCUYA BAĞLANDI"); });
     socket.on("disconnect", () => { setIsConnected(false); addLog("❌ Bağlantı Koptu"); });
 
     socket.on("user_joined_alert", (data) => {
-        addLog(`⚠️ RAKİP GELDİ: ${data.userId.substr(0,3)}`);
+        addLog(`⚠️ RAKİP SİNYALİ: ${data.userId.substr(0,3)}`);
         broadcastMyStatus(); 
     });
 
@@ -114,7 +111,7 @@ function App() {
             }
             return prevShield;
         });
-        addLog(`💥 HASAR ALINDI! (-${data.damage})`);
+        addLog(`💥 DİKKAT: Hasar Alındı! (-${data.damage})`);
     });
 
     socket.on("remote_cursor_move", (data) => setRemoteCursors(prev => ({ ...prev, [data.userId]: data.position })));
@@ -157,23 +154,22 @@ function App() {
       setAttackCooldown(true); setTimeout(() => setAttackCooldown(false), 1200); 
       const dmg = CLASSES[selectedClass].atk + (aiLevel * 5); 
       socket.emit("send_attack", { room, damage: dmg });
-      addLog(`⚔️ SALDIRI YAPILDI (Güç: ${dmg})`);
+      addLog(`⚔️ SALDIRI GÖNDERİLDİ (Güç: ${dmg})`);
   };
 
   const handleShield = () => { if(!isDead && resources >= 50) { setResources(p=>p-50); setShield(p=>p+30); addLog("🛡️ Kalkan +30"); }};
   const handleUpgrade = () => { 
       const cost = aiLevel * 150; 
-      if(!isDead && resources >= cost) { setResources(p=>p-cost); setAiLevel(p=>p+1); addLog(`🧬 LEVEL UP! (Lv. ${aiLevel+1})`); }
+      if(!isDead && resources >= cost) { setResources(p=>p-cost); setAiLevel(p=>p+1); addLog(`🧬 EVRİM GEÇİRİLDİ! (Lv. ${aiLevel+1})`); }
   };
 
-  // --- 1. GİRİŞ EKRANI (CSS DÜZELTİLDİ: YARIM KALMA YOK) ---
+  // --- 1. GİRİŞ EKRANI (FULL SCREEN FIXED) ---
   if (!isJoined) {
     return (
-      // 'position: fixed' ve 'inset: 0' sayesinde ekranı zorla kaplar, scroll bar çıkmaz.
-      <div style={{ position: 'fixed', inset: 0, background: '#050005', zIndex: 9999 }}>
+      <div style={{ position: 'fixed', inset: 0, width: '100vw', height: '100vh', background: '#050005', overflow: 'hidden', zIndex: 9999 }}>
         
-        {/* ARKA PLAN 3D SAHNE */}
-        <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 1 }}>
+        {/* ARKA PLAN */}
+        <div style={{ position: 'absolute', inset: 0, zIndex: 1 }}>
             <Canvas camera={{ position: [0, 0, 80], fov: 60 }}>
                 <color attach="background" args={['#0b0b1a']} />
                 <Stars radius={150} depth={50} count={6000} factor={7} saturation={0} fade />
@@ -184,22 +180,12 @@ function App() {
             </Canvas>
         </div>
         
-        {/* UI KATMANI (ORTALANMIŞ & FULL EKRAN) */}
-        <div style={{ 
-            position: 'absolute', inset: 0, zIndex: 10, 
-            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', 
-            background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(5px)' 
-        }}>
-          
-          <h1 style={{ 
-            fontSize: '70px', color: '#fff', marginBottom: '40px', 
-            fontFamily: "'Courier New', monospace", letterSpacing: '8px', 
-            textShadow: '0 0 30px var(--neon-blue)' 
-          }}>
+        {/* UI FORM */}
+        <div style={{ position: 'absolute', inset: 0, zIndex: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(5px)' }}>
+          <h1 style={{ fontSize: '60px', color: '#fff', marginBottom: '40px', fontFamily: "'Courier New', monospace", letterSpacing: '8px', textShadow: '0 0 30px var(--neon-blue)' }}>
             NEURO<span style={{color:'var(--neon-red)'}}>WARS</span>
           </h1>
 
-          {/* SINIF KARTLARI */}
           <div style={{ display: 'flex', gap: '25px', marginBottom: '40px' }}>
               {Object.keys(CLASSES).map(cls => (
                   <div key={cls} onClick={() => setSelectedClass(cls)} style={{ 
@@ -218,7 +204,6 @@ function App() {
               ))}
           </div>
 
-          {/* GİRİŞ INPUT & BUTON */}
           <div style={{ display: 'flex', gap: '15px' }}>
               <input type="text" placeholder="ODA NO (Örn: 101)" onChange={(e) => setRoom(e.target.value)} onKeyPress={(e) => e.key === "Enter" && joinRoom()} 
                      style={{ padding: '15px', fontSize: '18px', background: '#000', border: '1px solid #555', color: '#fff', borderRadius: '8px', textAlign: 'center', width: '200px', outline:'none' }} />
@@ -233,9 +218,9 @@ function App() {
     );
   }
 
-  // --- 2. OYUN EKRANI ---
+  // --- 2. OYUN EKRANI (FULL SCREEN FIXED) ---
   return (
-    <div style={{ width: "100vw", height: "100vh", background: "#0b0b1a", position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ position: 'fixed', inset: 0, width: "100vw", height: "100vh", background: "#0b0b1a", overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       
       {/* ÜST HUD */}
       <div style={{ position: 'absolute', top: '20px', left: '50%', transform: 'translateX(-50%)', width: '600px', display:'flex', gap:'20px', zIndex:10 }}>
@@ -249,6 +234,22 @@ function App() {
           </div>
       </div>
 
+      {/* RAKİP LİSTESİ */}
+      <div style={{position:'absolute', right:'20px', top:'20px', width:'220px', background:'rgba(0,0,0,0.6)', padding:'15px', borderRadius:'10px', border:'1px solid #333', zIndex:10}}>
+          <div style={{fontSize:'12px', color:'#aaa', marginBottom:'10px', fontWeight:'bold', borderBottom:'1px solid #444', paddingBottom:'5px'}}>RADAR HEDEFLERİ</div>
+          {Object.entries(players).map(([pid, stats]) => (
+              <div key={pid} style={{marginBottom:'8px', fontSize:'11px'}}>
+                  <div style={{display:'flex', justifyContent:'space-between', marginBottom:'3px'}}>
+                      <span style={{color: stats.isDead ? '#666' : '#fff', fontWeight:'bold'}}>{pid.substr(0,4)}</span>
+                      <span style={{color: CLASSES[stats.classType]?.color || '#fff'}}>{CLASSES[stats.classType]?.icon} Lv.{stats.level}</span>
+                  </div>
+                  <div style={{width:'100%', height:'4px', background:'#222'}}><div style={{width:`${(stats.hp/stats.maxHp)*100}%`, height:'100%', background:'red'}}></div></div>
+              </div>
+          ))}
+          {Object.keys(players).length === 0 && <div style={{color:'#666', fontStyle:'italic', fontSize:'11px'}}>Bölge temiz...</div>}
+      </div>
+
+      {/* 3D SAHNE */}
       <div style={{ flex: 1, position: 'relative' }}>
           {isUnderAttack && <div className="damage-overlay" />}
           <Canvas camera={{ position: [0, 0, 140], fov: 50 }}> 
@@ -263,12 +264,14 @@ function App() {
             <NeuralNetwork architecture={architecture} isUnderAttack={isUnderAttack} />
             <OrbitControls enablePan={false} minDistance={50} maxDistance={500} autoRotate={true} autoRotateSpeed={isUnderAttack ? 5.0 : 0.5} />
           </Canvas>
+          
           <div style={{ position: 'absolute', bottom: '20px', left: '20px', background: 'rgba(0,0,0,0.6)', padding: '15px', borderRadius: '8px', borderLeft: '3px solid var(--neon-blue)', fontFamily: "'Courier New', monospace", fontSize: '11px', color: 'var(--neon-blue)', width: '300px', pointerEvents: 'none' }}>
               {systemLogs.map((log, index) => (<div key={index} style={{ opacity: (index + 2) / (systemLogs.length + 1), marginBottom:'4px' }}>{`> ${log}`}</div>))}
               <div ref={logsEndRef} />
           </div>
       </div>
 
+      {/* ALT PANEL */}
       <div style={{ height: '140px', background: 'rgba(10, 10, 20, 0.95)', backdropFilter: 'blur(15px)', borderTop: '2px solid #444', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '30px', padding: '0 30px', zIndex: 20 }}>
         <div style={{textAlign:'center', width:'120px'}}>
             <div style={{fontSize:'36px', fontWeight:'900', color:'#fff', textShadow:'0 0 15px var(--neon-blue)'}}>{resources}</div>
