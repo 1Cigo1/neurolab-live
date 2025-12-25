@@ -1,30 +1,26 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, Stars, Html } from '@react-three/drei';
 import NeuralNetwork from './components/NeuralNetwork';
-import { useBrain } from './useBrain'; 
 import './App.css';
 import io from 'socket.io-client';
 
-// ⚠️ LİNKİNİ KONTROL ET
+// ⚠️ BURAYA KENDİ RENDER LİNKİNİ YAPIŞTIR!
+// Örnek: "https://neurolab-server-benimki.onrender.com"
 const SOCKET_URL = "https://neurolab-live-server.onrender.com"; 
 
 const socket = io.connect(SOCKET_URL); 
 
-const CHALLENGES = {
-  XOR: { name: "GÖREV: XOR (ZOR)", targets: [0, 1, 1, 0] },
-  AND: { name: "GÖREV: VE (AND)", targets: [0, 0, 0, 1] },
-  OR:  { name: "GÖREV: VEYA (OR)", targets: [0, 1, 1, 1] }
+// ... (Geri kalan kodların hepsi AYNI, sadece yukarıdaki linki değiştirmen yeterli)
+// ... Kodun geri kalanını silmene gerek yok, sadece üstteki SOCKET_URL satırını güncelle.
+
+const CLASSES = {
+    STRIKER: { name: "SALDIRGAN", hp: 100, atk: 25, def: 0, color: "#ff0055", icon: "⚔️", desc: "Yüksek Hasar" },
+    TANK:    { name: "KALKAN",    hp: 200, atk: 10, def: 30, color: "#ffff00", icon: "🛡️", desc: "Yüksek Defans" },
+    HACKER:  { name: "HACKER",    hp: 120, atk: 15, def: 10, color: "#00ff88", icon: "💻", desc: "Hızlı Kaynak" } 
 };
 
-// --- İMLEÇLER ---
-const RemoteCursors = ({ cursors }) => Object.entries(cursors).map(([userId, pos]) => (
-    <group key={userId} position={pos}>
-        <mesh><sphereGeometry args={[1.5, 16, 16]} /><meshBasicMaterial color="#ff00ff" /></mesh>
-        <Html distanceFactor={25} position={[0, 3, 0]}><div style={{background:'rgba(255,0,255,0.8)', color:'white', padding:'2px 5px', borderRadius:'4px', fontSize:'10px'}}>User {userId.substr(0,4)}</div></Html>
-    </group>
-));
-
+// --- YARDIMCI BİLEŞENLER ---
 const MousePlane = ({ onMove }) => {
     const { camera, raycaster, mouse } = useThree();
     const planeRef = useRef();
@@ -35,282 +31,253 @@ const MousePlane = ({ onMove }) => {
             if (intersects.length > 0) onMove(intersects[0].point);
         }
     });
-    return <mesh ref={planeRef} visible={false}><planeGeometry args={[5000, 5000]} /></mesh>;
+    return <mesh ref={planeRef} visible={false}><planeGeometry args={[10000, 10000]} /></mesh>;
 };
+
+const RemoteCursors = ({ cursors }) => Object.entries(cursors).map(([userId, pos]) => (
+    <group key={userId} position={pos}>
+        <mesh><sphereGeometry args={[2, 16, 16]} /><meshBasicMaterial color="#ff00ff" /></mesh>
+        <Html distanceFactor={40} position={[0, 4, 0]}><div style={{background:'rgba(255,0,255,0.6)', color:'#fff', padding:'2px', borderRadius:'4px', fontSize:'10px', fontWeight:'bold', border:'1px solid #ff00ff'}}>DÜŞMAN</div></Html>
+    </group>
+));
 
 function App() {
   const [room, setRoom] = useState(""); 
+  const [selectedClass, setSelectedClass] = useState("STRIKER");
   const [isJoined, setIsJoined] = useState(false);
   const [isConnected, setIsConnected] = useState(socket.connected);
-  
-  const [architecture, setArchitecture] = useState([2, 4, 4, 1]);
-  const [learningRate, setLearningRate] = useState(0.03);
-  const [manualInput, setManualInput] = useState([0, 0]); 
-  const [deadNeurons, setDeadNeurons] = useState([]);
-  
-  const [currentChallenge, setCurrentChallenge] = useState("XOR"); 
-  const [leaderboard, setLeaderboard] = useState({}); 
 
-  const [systemLogs, setSystemLogs] = useState(["Sistem Başlatılıyor..."]);
+  // İstatistikler
+  const [hp, setHp] = useState(100);
+  const [maxHp, setMaxHp] = useState(100);
+  const [shield, setShield] = useState(0);
+  const [resources, setResources] = useState(0);
+  const [aiLevel, setAiLevel] = useState(1);
+  const [isDead, setIsDead] = useState(false);
+
+  // Efektler
+  const [isUnderAttack, setIsUnderAttack] = useState(false);
+  const [attackCooldown, setAttackCooldown] = useState(false);
+  const [players, setPlayers] = useState({}); 
+  const [remoteCursors, setRemoteCursors] = useState({});
+  const [systemLogs, setSystemLogs] = useState(["Sistem Hazır.", "Bağlantı Bekleniyor..."]);
   const logsEndRef = useRef(null); 
 
-  const [remoteCursors, setRemoteCursors] = useState({}); 
-  const [chatMessages, setChatMessages] = useState([]);
-  const [chatInput, setChatInput] = useState("");
-  const chatEndRef = useRef(null);
-
-  const architectureRef = useRef(architecture);
-  const deadNeuronsRef = useRef(deadNeurons);
-  const lossRef = useRef(null);
-
-  useEffect(() => { architectureRef.current = architecture; }, [architecture]);
-  useEffect(() => { deadNeuronsRef.current = deadNeurons; }, [deadNeurons]);
-
-  const { weights, loss, isTraining, predictions, train } = useBrain(architecture);
-  const inputs = ["0, 0", "0, 1", "1, 0", "1, 1"];
-  const targets = CHALLENGES[currentChallenge].targets;
-
-  // SKOR YAYINI
-  useEffect(() => {
-    lossRef.current = loss;
-    if (isJoined && room) {
-        // Herkes duysun
-        const valToSend = loss ? loss : "Hazır";
-        socket.emit("broadcast_loss", { room, loss: valToSend, userId: socket.id });
-    }
-  }, [loss, room, isJoined]);
-
-  const addLog = (msg) => { setSystemLogs(prev => [...prev.slice(-4), msg]); };
-
+  const addLog = (msg) => { setSystemLogs(prev => [...prev.slice(-5), msg]); };
   useEffect(() => { if(logsEndRef.current) logsEndRef.current.scrollIntoView({ behavior: "smooth" }); }, [systemLogs]);
-  useEffect(() => { if(chatEndRef.current) chatEndRef.current.scrollIntoView({ behavior: "smooth" }); }, [chatMessages]);
 
+  // MİMARİ: Seviye arttıkça hacimsel olarak büyür
+  const architecture = useMemo(() => {
+      const base = [3, 5, 2]; 
+      if(aiLevel >= 2) base[1] += 5;       // 10 Nöron
+      if(aiLevel >= 3) base.splice(1, 0, 8); // Yeni katman (8 nöron)
+      if(aiLevel >= 4) base[2] += 6;       
+      if(aiLevel >= 5) base.push(4);
+      if(aiLevel >= 6) base.splice(2, 0, 12); // Devasa orta katman
+      return base;
+  }, [aiLevel]);
+
+  // SOCKET EVENTS
   useEffect(() => {
-    socket.on("connect", () => { setIsConnected(true); console.log("Socket: BAĞLANDI"); });
-    socket.on("disconnect", () => { setIsConnected(false); console.log("Socket: KOPTU"); });
+    socket.on("connect", () => { setIsConnected(true); addLog("✅ BAĞLANDI (Localhost)"); });
+    socket.on("disconnect", () => { setIsConnected(false); addLog("❌ Bağlantı Koptu"); });
 
-    // ODAYA GİRİŞ & SKOR PAYLAŞIMI
     socket.on("user_joined_alert", (data) => {
-        addLog(`👤 User ${data.userId.substr(0,4)} odaya girdi.`);
-        
-        // Yeni gelene elimizdeki haritayı verelim
-        if(socket.id !== data.userId) {
-            socket.emit("sync_architecture", { room, architecture: architectureRef.current });
-            socket.emit("sync_dead_neurons", { room, deadNeurons: deadNeuronsRef.current });
+        addLog(`⚠️ RAKİP GELDİ: ${data.userId.substr(0,3)}`);
+        broadcastMyStatus(); 
+    });
+
+    socket.on("update_player_status", (data) => {
+        if(data.userId !== socket.id) {
+            setPlayers(prev => ({ ...prev, [data.userId]: data.stats }));
         }
-        
-        // Skor paylaş
-        const myLoss = lossRef.current || "Hazır";
-        socket.emit("broadcast_loss", { room, loss: myLoss, userId: socket.id });
     });
 
-    socket.on("request_data_refresh", () => {
-        const myLoss = lossRef.current || "Hazır";
-        socket.emit("broadcast_loss", { room, loss: myLoss, userId: socket.id });
+    socket.on("receive_attack", (data) => {
+        if(isDead) return;
+        setIsUnderAttack(true);
+        setTimeout(() => setIsUnderAttack(false), 800); 
+
+        setShield(prevShield => {
+            let dmg = data.damage;
+            if (prevShield > 0) {
+                const absorb = Math.min(prevShield, dmg);
+                dmg -= absorb;
+                return prevShield - absorb;
+            }
+            if (dmg > 0) {
+                setHp(prevHp => {
+                    const newHp = prevHp - dmg;
+                    if (newHp <= 0) handleDeath();
+                    return newHp;
+                });
+            }
+            return prevShield;
+        });
+        addLog(`💥 HASAR ALINDI! (-${data.damage})`);
     });
 
-    socket.on("update_leaderboard", (data) => {
-        console.log("Skor alındı:", data);
-        setLeaderboard(prev => ({ ...prev, [data.userId]: data.loss }));
-    });
-
-    // MESAJ ALIMI
-    socket.on("receive_message", (data) => {
-        console.log("Mesaj alındı:", data);
-        setChatMessages(prev => [...prev, data]);
-    });
-
-    socket.on("sync_architecture", (data) => setArchitecture(data));
-    socket.on("sync_dead_neurons", (list) => setDeadNeurons(list));
-    socket.on("sync_training_start", () => addLog("⚠️ Eğitim Başladı!"));
     socket.on("remote_cursor_move", (data) => setRemoteCursors(prev => ({ ...prev, [data.userId]: data.position })));
     socket.on("user_left", (data) => {
+        setPlayers(prev => { const n={...prev}; delete n[data.userId]; return n; });
         setRemoteCursors(prev => { const n={...prev}; delete n[data.userId]; return n; });
-        setLeaderboard(prev => { const n={...prev}; delete n[data.userId]; return n; });
-        addLog("👤 Biri ayrıldı.");
     });
 
     return () => {
-        socket.off("receive_message"); socket.off("update_leaderboard"); 
-        socket.off("user_joined_alert"); socket.off("request_data_refresh");
-        socket.off("remote_cursor_move");
+        socket.off("connect"); socket.off("disconnect");
+        socket.off("user_joined_alert"); socket.off("update_player_status");
+        socket.off("receive_attack"); socket.off("remote_cursor_move"); socket.off("user_left");
     };
-  }, [room, isJoined]);
+  }, [isDead]);
 
-  const joinRoom = () => { 
-      if (room.trim() !== "") { 
-          const cleanRoom = String(room).trim();
-          console.log("Odaya giriliyor:", cleanRoom);
-          socket.emit("join_room", cleanRoom); 
-          setIsJoined(true); 
-          setLeaderboard(prev => ({ ...prev, [socket.id]: "Hazır" }));
-      } 
+  useEffect(() => { if(isJoined) broadcastMyStatus(); }, [hp, shield, aiLevel]);
+
+  const broadcastMyStatus = () => {
+      socket.emit("broadcast_status", { room, stats: { hp, maxHp, shield, classType: selectedClass, level: aiLevel, isDead } });
   };
 
-  const updateArchitecture = (newArch) => {
-    setArchitecture(newArch); setDeadNeurons([]); 
-    socket.emit("sync_architecture", { room, architecture: newArch });
-    socket.emit("sync_dead_neurons", { room, deadNeurons: [] });
-    addLog("🔧 Mimari güncellendi.");
-  };
+  const handleDeath = () => { setIsDead(true); setHp(0); addLog("💀 SİSTEM ÇÖKTÜ."); };
 
-  const handleTrain = () => { train(learningRate, targets, addLog); socket.emit("sync_training_start", room); };
-
-  const toggleNeuronLife = (id) => {
-    let newDeadList;
-    if (deadNeurons.includes(id)) { newDeadList = deadNeurons.filter(d => d !== id); addLog(`💊 Nöron ${id} onarıldı.`); }
-    else { newDeadList = [...deadNeurons, id]; addLog(`💀 SABOTAJ: Nöron ${id} devre dışı!`); }
-    setDeadNeurons(newDeadList);
-    socket.emit("sync_dead_neurons", { room, deadNeurons: newDeadList });
+  const joinRoom = () => {
+      if (room.trim() !== "") {
+          socket.emit("join_room", room.trim());
+          setIsJoined(true);
+          const stats = CLASSES[selectedClass];
+          setHp(stats.hp); setMaxHp(stats.hp); setShield(selectedClass === "TANK" ? 50 : 0); setResources(50);
+      }
   };
 
   const handleMouseMove = (point) => { if (room) socket.emit("cursor_move", { room, position: [point.x, point.y, point.z] }); };
+
+  const handleGather = () => { if(!isDead) setResources(prev => prev + (selectedClass === "HACKER" ? 20 : 10)); };
   
-  const sendMessage = () => { 
-      if (chatInput.trim() !== "") { 
-          console.log("Mesaj gönderiliyor:", chatInput);
-          socket.emit("send_message", { room, text: chatInput }); 
-          setChatInput(""); 
-      } 
+  const handleAttack = () => {
+      if(isDead || attackCooldown || resources < 20) return;
+      setResources(prev => prev - 20);
+      setAttackCooldown(true); setTimeout(() => setAttackCooldown(false), 1200); 
+      const dmg = CLASSES[selectedClass].atk + (aiLevel * 5); 
+      socket.emit("send_attack", { room, damage: dmg });
+      addLog(`⚔️ SALDIRI YAPILDI (Güç: ${dmg})`);
   };
 
+  const handleShield = () => { if(!isDead && resources >= 50) { setResources(p=>p-50); setShield(p=>p+30); addLog("🛡️ Kalkan +30"); }};
+  const handleUpgrade = () => { 
+      const cost = aiLevel * 150; 
+      if(!isDead && resources >= cost) { setResources(p=>p-cost); setAiLevel(p=>p+1); addLog(`🧬 LEVEL UP! (Lv. ${aiLevel+1})`); }
+  };
+
+  // --- 1. GİRİŞ EKRANI (CSS DÜZELTİLDİ: YARIM KALMA YOK) ---
   if (!isJoined) {
     return (
-      <div className="login-container">
-        <div className="login-box">
-          <h1>NEUROLAB PORTAL</h1>
-          <div style={{ color: isConnected ? '#00ff88' : '#ff0055', fontWeight: 'bold', marginBottom: '10px', border: '1px solid', padding:'5px', borderRadius:'4px' }}>
-             {isConnected ? "✅ SUNUCUYA BAĞLI" : "❌ BAĞLANTI YOK (Linkini Kontrol Et)"}
-          </div>
-          <input type="text" placeholder="ODA NO (Örn: 101)" onChange={(e) => setRoom(e.target.value)} onKeyPress={(e) => e.key === "Enter" && joinRoom()}/>
-          <button onClick={joinRoom} disabled={!isConnected}>SUNUCUYA BAĞLAN</button>
+      // 'position: fixed' ve 'inset: 0' sayesinde ekranı zorla kaplar, scroll bar çıkmaz.
+      <div style={{ position: 'fixed', inset: 0, background: '#050005', zIndex: 9999 }}>
+        
+        {/* ARKA PLAN 3D SAHNE */}
+        <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '100%', zIndex: 1 }}>
+            <Canvas camera={{ position: [0, 0, 80], fov: 60 }}>
+                <color attach="background" args={['#0b0b1a']} />
+                <Stars radius={150} depth={50} count={6000} factor={7} saturation={0} fade />
+                <ambientLight intensity={1.5} />
+                <pointLight position={[20, 20, 20]} intensity={5} color="#00aaff" />
+                <NeuralNetwork architecture={[3, 5, 3]} isUnderAttack={false} />
+                <OrbitControls autoRotate autoRotateSpeed={1.5} enableZoom={false} enablePan={false} />
+            </Canvas>
         </div>
-        <Canvas className="login-canvas"><color attach="background" args={['#101015']} /><Stars radius={50} count={2000} factor={4} fade /><ambientLight intensity={2} /><OrbitControls autoRotate enableZoom={false} /><NeuralNetwork architecture={[2, 4, 2]} /></Canvas>
+        
+        {/* UI KATMANI (ORTALANMIŞ & FULL EKRAN) */}
+        <div style={{ 
+            position: 'absolute', inset: 0, zIndex: 10, 
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', 
+            background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(5px)' 
+        }}>
+          
+          <h1 style={{ 
+            fontSize: '70px', color: '#fff', marginBottom: '40px', 
+            fontFamily: "'Courier New', monospace", letterSpacing: '8px', 
+            textShadow: '0 0 30px var(--neon-blue)' 
+          }}>
+            NEURO<span style={{color:'var(--neon-red)'}}>WARS</span>
+          </h1>
+
+          {/* SINIF KARTLARI */}
+          <div style={{ display: 'flex', gap: '25px', marginBottom: '40px' }}>
+              {Object.keys(CLASSES).map(cls => (
+                  <div key={cls} onClick={() => setSelectedClass(cls)} style={{ 
+                      width: '180px', padding: '25px', 
+                      background: selectedClass === cls ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.7)', 
+                      border: selectedClass === cls ? `2px solid ${CLASSES[cls].color}` : '1px solid #444', 
+                      borderRadius: '16px', cursor: 'pointer', 
+                      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '15px', 
+                      transition: '0.3s', transform: selectedClass === cls ? 'scale(1.1)' : 'scale(1)',
+                      boxShadow: selectedClass === cls ? `0 0 30px ${CLASSES[cls].color}66` : 'none'
+                  }}>
+                      <div style={{ fontSize: '50px' }}>{CLASSES[cls].icon}</div>
+                      <div style={{ fontWeight: 'bold', fontSize:'20px', color: CLASSES[cls].color }}>{CLASSES[cls].name}</div>
+                      <div style={{ fontSize: '13px', color: '#ccc' }}>HP: {CLASSES[cls].hp} | ATK: {CLASSES[cls].atk}</div>
+                  </div>
+              ))}
+          </div>
+
+          {/* GİRİŞ INPUT & BUTON */}
+          <div style={{ display: 'flex', gap: '15px' }}>
+              <input type="text" placeholder="ODA NO (Örn: 101)" onChange={(e) => setRoom(e.target.value)} onKeyPress={(e) => e.key === "Enter" && joinRoom()} 
+                     style={{ padding: '15px', fontSize: '18px', background: '#000', border: '1px solid #555', color: '#fff', borderRadius: '8px', textAlign: 'center', width: '200px', outline:'none' }} />
+              
+              <button onClick={joinRoom} disabled={!isConnected} 
+                      style={{ padding: '15px 35px', fontSize: '18px', fontWeight: 'bold', background: isConnected ? 'var(--neon-blue)' : '#333', color: isConnected ? '#000' : '#666', border: 'none', borderRadius: '8px', cursor: isConnected ? 'pointer' : 'not-allowed', boxShadow: isConnected ? '0 0 20px var(--neon-blue)' : 'none' }}>
+                  {isConnected ? "SAVAŞA KATIL" : "BAĞLANIYOR..."}
+              </button>
+          </div>
+        </div>
       </div>
     );
   }
 
+  // --- 2. OYUN EKRANI ---
   return (
-    <div style={{ width: "100vw", height: "100vh", background: "#050b14", position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ width: "100vw", height: "100vh", background: "#0b0b1a", position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
       
-      {/* ÜST BAR */}
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '40px', background: 'linear-gradient(180deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '0 20px', zIndex: 10 }}>
-          <h3 style={{ margin: 0, fontSize: '18px', color: '#fff', letterSpacing: '2px', textShadow: '0 0 10px rgba(0,255,136,0.5)' }}>NEUROLAB <span style={{fontSize:'12px', color:'var(--neon-green)'}}>v2.0</span></h3>
-          <div className="status-badge connected" style={{fontSize: '11px', padding: '4px 10px', borderRadius:'12px', background: isConnected ? 'rgba(0,255,136,0.1)' : 'rgba(255,0,0,0.2)', border: isConnected ? '1px solid var(--neon-green)' : '1px solid red'}}>ODA: {room} ● {isConnected ? "ONLINE" : "OFFLINE"}</div>
+      {/* ÜST HUD */}
+      <div style={{ position: 'absolute', top: '20px', left: '50%', transform: 'translateX(-50%)', width: '600px', display:'flex', gap:'20px', zIndex:10 }}>
+          <div style={{flex:1, height:'25px', background:'#222', borderRadius:'12px', overflow:'hidden', border:'2px solid #444', position:'relative', boxShadow:'0 0 15px rgba(0,0,0,0.5)'}}>
+              <div style={{width: `${(hp/maxHp)*100}%`, height:'100%', background:'linear-gradient(90deg, #aa0000, #ff0000)', transition:'width 0.3s'}}></div>
+              <div style={{position:'absolute', top:0, width:'100%', lineHeight:'22px', textAlign:'center', fontSize:'12px', fontWeight:'bold', color:'#fff'}}>HP: {hp} / {maxHp}</div>
+          </div>
+          <div style={{flex:1, height:'25px', background:'#222', borderRadius:'12px', overflow:'hidden', border:'2px solid #444', position:'relative', boxShadow:'0 0 15px rgba(0,0,0,0.5)'}}>
+              <div style={{width: `${Math.min(100, shield)}%`, height:'100%', background:'linear-gradient(90deg, #aa8800, #ffff00)', transition:'width 0.3s'}}></div>
+              <div style={{position:'absolute', top:0, width:'100%', lineHeight:'22px', textAlign:'center', fontSize:'12px', fontWeight:'bold', color:'#fff'}}>KALKAN: {shield}</div>
+          </div>
       </div>
 
-      {/* 3D SAHNE */}
       <div style={{ flex: 1, position: 'relative' }}>
-          <Canvas camera={{ position: [0, 0, 120], fov: 60 }}> 
-            <color attach="background" args={['#050b14']} />
-            <ambientLight intensity={5.0} /> 
-            <hemisphereLight skyColor="#ffffff" groundColor="#444444" intensity={2.0} />
-            <pointLight position={[100, 100, 100]} intensity={3.0} />
-            <pointLight position={[-100, -100, -100]} intensity={3.0} color="#00aaff" />
-            <Stars radius={300} depth={100} count={10000} factor={7} saturation={0} fade />
+          {isUnderAttack && <div className="damage-overlay" />}
+          <Canvas camera={{ position: [0, 0, 140], fov: 50 }}> 
+            <color attach="background" args={['#0b0b1a']} /> 
+            <fog attach="fog" args={['#0b0b1a', 100, 600]} />
+            <ambientLight intensity={2} /> 
+            <pointLight position={[50, 50, 50]} intensity={5} color="#00aaff" />
+            <pointLight position={[-50, -50, -50]} intensity={5} color="#ff0055" />
+            <Stars radius={200} depth={50} count={8000} factor={7} saturation={0} fade />
             <MousePlane onMove={handleMouseMove} />
             <RemoteCursors cursors={remoteCursors} />
-            <NeuralNetwork architecture={architecture} weights={weights} manualInput={manualInput} deadNeurons={deadNeurons} onNeuronClick={toggleNeuronLife} />
-            <OrbitControls enablePan={true} minDistance={10} maxDistance={600} autoRotate={true} autoRotateSpeed={0.5} />
+            <NeuralNetwork architecture={architecture} isUnderAttack={isUnderAttack} />
+            <OrbitControls enablePan={false} minDistance={50} maxDistance={500} autoRotate={true} autoRotateSpeed={isUnderAttack ? 5.0 : 0.5} />
           </Canvas>
-          <div style={{ position: 'absolute', top: '50px', left: '20px', background: 'rgba(0,0,0,0.6)', padding: '10px', borderRadius: '4px', borderLeft: '2px solid var(--neon-green)', fontFamily: "'Courier New', monospace", fontSize: '11px', color: '#00ff88', maxWidth: '300px', pointerEvents: 'none' }}>
-              {systemLogs.map((log, index) => (<div key={index} style={{ opacity: (index + 2) / (systemLogs.length + 1) }}>{`> ${log}`}</div>))}
+          <div style={{ position: 'absolute', bottom: '20px', left: '20px', background: 'rgba(0,0,0,0.6)', padding: '15px', borderRadius: '8px', borderLeft: '3px solid var(--neon-blue)', fontFamily: "'Courier New', monospace", fontSize: '11px', color: 'var(--neon-blue)', width: '300px', pointerEvents: 'none' }}>
+              {systemLogs.map((log, index) => (<div key={index} style={{ opacity: (index + 2) / (systemLogs.length + 1), marginBottom:'4px' }}>{`> ${log}`}</div>))}
               <div ref={logsEndRef} />
           </div>
       </div>
 
-      {/* ALT PANEL (240px) */}
-      <div style={{ height: '240px', background: 'rgba(10, 15, 30, 0.95)', backdropFilter: 'blur(15px)', borderTop: '1px solid rgba(0, 255, 136, 0.3)', display: 'flex', justifyContent: 'space-between', padding: '15px 20px', boxShadow: '0 -10px 40px rgba(0,0,0,0.5)', zIndex: 20 }}>
-        
-        {/* SOL: EĞİTİM */}
-        <div style={{ width: '20%', display: 'flex', flexDirection: 'column', gap: '10px', borderRight:'1px solid rgba(255,255,255,0.1)', paddingRight:'15px' }}>
-            <div style={{fontSize:'12px', color:'#aaa', fontWeight:'bold'}}>GÖREV & EĞİTİM</div>
-            <select value={currentChallenge} onChange={(e) => setCurrentChallenge(e.target.value)} disabled={isTraining} style={{ width: '100%', padding: '8px', background: '#080808', color: 'var(--neon-green)', border: '1px solid #333', borderRadius: '4px', fontWeight: 'bold' }}>{Object.keys(CHALLENGES).map(key => (<option key={key} value={key}>{CHALLENGES[key].name}</option>))}</select>
-            <div style={{ display:'flex', justifyContent:'space-between', fontSize:'10px', color:'#aaa' }}><span>HIZ: {learningRate}</span></div>
-            <input type="range" min="0.001" max="0.5" step="0.01" value={learningRate} onChange={(e) => setLearningRate(e.target.value)} disabled={isTraining} style={{ width: '100%', height:'4px', accentColor:'var(--neon-blue)' }}/>
-            <button onClick={handleTrain} disabled={isTraining} style={{ padding: '10px', fontSize: '12px', fontWeight: 'bold', background: isTraining ? '#333' : 'linear-gradient(90deg, var(--neon-blue) 0%, #0066ff 100%)', color: '#fff', border: 'none', borderRadius: '4px', cursor: 'pointer', marginTop:'auto' }}>{isTraining ? 'EĞİTİM SÜRÜYOR...' : '>> EĞİTİMİ BAŞLAT'}</button>
+      <div style={{ height: '140px', background: 'rgba(10, 10, 20, 0.95)', backdropFilter: 'blur(15px)', borderTop: '2px solid #444', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '30px', padding: '0 30px', zIndex: 20 }}>
+        <div style={{textAlign:'center', width:'120px'}}>
+            <div style={{fontSize:'36px', fontWeight:'900', color:'#fff', textShadow:'0 0 15px var(--neon-blue)'}}>{resources}</div>
+            <div style={{fontSize:'10px', color:'#aaa'}}>ENERJİ</div>
         </div>
-
-        {/* ORTA: VERİLER */}
-        <div style={{ width: '35%', display: 'flex', gap: '15px', paddingLeft:'15px', borderRight:'1px solid rgba(255,255,255,0.1)', paddingRight:'15px' }}>
-            <div style={{ flex: 2, overflowY:'auto' }}>
-                <table className="data-table" style={{width:'100%', fontSize:'11px', borderCollapse:'collapse'}}><thead><tr style={{color:'#888', borderBottom:'1px solid #333'}}><th style={{textAlign:'left'}}>GİRİŞ</th><th style={{textAlign:'center'}}>HEDEF</th><th style={{textAlign:'right'}}>SONUÇ</th></tr></thead><tbody>{inputs.map((inp, i) => { const val = predictions[i] || 0; const isCorrect = Math.abs(targets[i] - val) < 0.5; return ( <tr key={i} style={{borderBottom:'1px solid rgba(255,255,255,0.05)'}}><td style={{fontFamily: 'monospace', color:'#ccc'}}>[{inp}]</td><td style={{textAlign:'center', color:'#ccc'}}>{targets[i]}</td><td style={{textAlign:'right', color: isCorrect?'var(--neon-green)':'var(--neon-red)', fontWeight: 'bold'}}>{val?val.toFixed(4):'---'}</td></tr>)})}</tbody></table>
-            </div>
-            <div style={{ flex: 1, display:'flex', flexDirection:'column', gap:'5px' }}>
-                <div style={{fontSize:'12px', color:'#aaa', fontWeight:'bold', textAlign:'center'}}>MANUEL</div>
-                <button onClick={() => setManualInput([manualInput[0]===0?1:0, manualInput[1]])} style={{ padding:'8px', background: manualInput[0] ? 'var(--neon-green)' : 'rgba(255,255,255,0.1)', color: manualInput[0]?'#000':'#ccc', border:'none', borderRadius:'4px', cursor:'pointer', fontSize:'10px' }}>GİRİŞ A</button>
-                <button onClick={() => setManualInput([manualInput[0], manualInput[1]===0?1:0])} style={{ padding:'8px', background: manualInput[1] ? 'var(--neon-green)' : 'rgba(255,255,255,0.1)', color: manualInput[1]?'#000':'#ccc', border:'none', borderRadius:'4px', cursor:'pointer', fontSize:'10px' }}>GİRİŞ B</button>
-                <div style={{ textAlign:'center', marginTop:'auto', background:'#000', padding:'5px', borderRadius:'4px' }}><div style={{fontSize:'9px', color:'#888'}}>TAHMİN</div><strong style={{color:'var(--neon-blue)', fontSize:'16px'}}>{(() => { const idx = (manualInput[0] * 2) + manualInput[1]; return predictions[idx] ? predictions[idx].toFixed(4) : '---'; })()}</strong></div>
-            </div>
-        </div>
-
-        {/* SAĞ: SKOR & MİMARİ */}
-        <div style={{ width: '20%', display: 'flex', flexDirection: 'column', gap: '8px', paddingLeft:'15px', borderRight:'1px solid rgba(255,255,255,0.1)', paddingRight:'15px' }}>
-             <div style={{fontSize:'12px', color:'#aaa', fontWeight:'bold'}}>SKOR TABLOSU</div>
-             <div style={{ flex:1, background: 'rgba(0,0,0,0.3)', padding: '5px', borderRadius: '4px', overflowY: 'auto' }}>
-                {Object.keys(leaderboard).length === 0 ? <div style={{fontSize:'10px', color:'#666'}}>Veri bekleniyor...</div> : null}
-                {Object.entries(leaderboard).sort(([, a], [, b]) => parseFloat(a) - parseFloat(b)).map(([user, score]) => (
-                    <div key={user} style={{ display: 'flex', justifyContent: 'space-between', fontSize:'11px', marginBottom:'2px' }}>
-                        <span style={{ color: user === socket.id ? '#fff' : '#888', fontWeight: user === socket.id ? 'bold' : 'normal' }}>
-                            {user === socket.id ? "User BEN" : `User ${user.substr(0,4)}`}
-                        </span>
-                        <span style={{ color: user === socket.id ? 'var(--neon-green)' : '#aaa', fontFamily: 'monospace' }}>
-                            {score}
-                        </span>
-                    </div>
-                ))}
-             </div>
-             <div style={{ display: 'flex', gap: '5px' }}><button onClick={() => updateArchitecture([2, ...architecture.slice(1, -1), 4, 1])} disabled={isTraining} style={{ flex: 1, padding:'4px', background:'rgba(255,255,255,0.1)', border:'1px solid #333', color:'#fff', borderRadius:'4px', cursor:'pointer', fontSize:'10px' }}>+ KATMAN</button><button onClick={() => updateArchitecture([2, 4, 1])} disabled={isTraining} style={{ flex: 1, padding:'4px', background:'rgba(255,0,0,0.2)', border:'1px solid #333', color:'#fff', borderRadius:'4px', cursor:'pointer', fontSize:'10px' }}>SIFIRLA</button></div>
-        </div>
-
-        {/* EN SAĞ: SOHBET (Düzeltildi) */}
-        <div style={{ width: '25%', display: 'flex', flexDirection: 'column', gap: '5px', paddingLeft:'15px' }}>
-            <div style={{fontSize:'12px', color:'#aaa', fontWeight:'bold'}}>TAKIM SOHBETİ</div>
-            <div style={{ 
-                flex: 1, 
-                background:'rgba(0,0,0,0.6)', 
-                border:'1px solid #333', 
-                borderRadius:'4px', 
-                padding:'10px', 
-                overflowY:'auto', 
-                display:'flex', 
-                flexDirection:'column', 
-                gap:'8px',
-                minHeight: '100px'
-            }}>
-                {chatMessages.length === 0 ? <div style={{color:'#555', fontStyle:'italic', textAlign:'center', marginTop:'10px'}}>Henüz mesaj yok...</div> : null}
-                {chatMessages.map((msg, idx) => {
-                    const isMe = msg.userId === socket.id;
-                    return (
-                        <div key={idx} style={{
-                            alignSelf: isMe ? 'flex-end' : 'flex-start',
-                            background: isMe ? 'rgba(0, 255, 136, 0.15)' : 'rgba(255, 255, 255, 0.1)',
-                            border: isMe ? '1px solid var(--neon-green)' : '1px solid #444',
-                            color: '#eee',
-                            padding: '6px 10px',
-                            borderRadius: '8px',
-                            borderTopRightRadius: isMe ? '0px' : '8px',
-                            borderTopLeftRadius: isMe ? '8px' : '0px',
-                            maxWidth: '90%',
-                            fontSize: '11px',
-                            boxShadow: '0 2px 5px rgba(0,0,0,0.2)',
-                            position: 'relative',
-                            fontFamily: "'Segoe UI', sans-serif"
-                        }}>
-                            {!isMe && <div style={{fontSize:'9px', color:'#ff00ff', marginBottom:'2px', fontWeight:'bold'}}>User {msg.userId.substr(0,4)}</div>}
-                            <div style={{wordBreak: 'break-word', lineHeight:'1.4'}}>{msg.text}</div>
-                            <div style={{fontSize:'8px', color:'rgba(255,255,255,0.4)', textAlign:'right', marginTop:'4px'}}>{msg.time}</div>
-                        </div>
-                    );
-                })}
-                <div ref={chatEndRef} />
-            </div>
-            <div style={{ display:'flex', gap:'5px', marginTop:'auto' }}>
-                <input type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)} onKeyPress={(e) => e.key === 'Enter' && sendMessage()} placeholder="Mesaj yaz..." style={{ flex:1, background:'#111', border:'1px solid #333', color:'#fff', fontSize:'11px', padding:'8px', borderRadius:'2px' }}/>
-                <button onClick={sendMessage} style={{ background:'var(--neon-green)', color:'#000', border:'none', padding:'0 15px', borderRadius:'2px', cursor:'pointer', fontWeight:'bold' }}>➔</button>
-            </div>
-        </div>
-
+        <button onClick={handleGather} className="war-btn blue"><div style={{fontSize:'22px'}}>⚡</div><div>TOPLA</div></button>
+        <button onClick={handleAttack} disabled={attackCooldown} className="war-btn red" style={{transform: attackCooldown ? 'scale(0.95)' : 'scale(1)', opacity: attackCooldown?0.6:1}}><div style={{fontSize:'22px'}}>⚔️</div><div>SALDIR</div></button>
+        <button onClick={handleShield} className="war-btn yellow"><div style={{fontSize:'22px'}}>🛡️</div><div>KALKAN</div></button>
+        <button onClick={handleUpgrade} className="war-btn green"><div style={{fontSize:'22px'}}>🧬</div><div>EVRİM (Lv.{aiLevel+1})</div></button>
       </div>
     </div>
   );
