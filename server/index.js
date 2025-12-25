@@ -1,17 +1,21 @@
+const { createServer } = require("http"); // Node'un kendi sunucusu
 const { Server } = require("socket.io");
 
-// ⚠️ RENDER İÇİN KRİTİK AYAR:
-// Render bize otomatik bir port verir, onu kullanmalıyız. Yoksa 3001'i kullan.
+// Render'ın verdiği portu al
 const PORT = process.env.PORT || 3001;
 
-const io = new Server(PORT, {
+// 1. Önce HTTP Sunucusu oluştur (Boş bir kutu gibi düşün)
+const httpServer = createServer();
+
+// 2. Socket.io'yu bu kutunun içine kur
+const io = new Server(httpServer, {
   cors: {
-    origin: "*", // Her yerden (cep telefonu, tablet, pc) girişe izin ver
+    origin: "*", // Her yerden girişe izin ver
     methods: ["GET", "POST"]
   }
 });
 
-console.log(`🚀 NEUROWARS Sunucusu ${PORT} portunda BAŞLATILIYOR...`);
+console.log(`🚀 NEUROWARS Sunucusu ${PORT} portunda HAZIRLANIYOR...`);
 
 io.on("connection", (socket) => {
     console.log(`✅ Bağlantı: ${socket.id}`);
@@ -40,4 +44,7 @@ io.on("connection", (socket) => {
     });
 });
 
-io.listen(PORT);
+// 3. KUTUYU BAŞLAT (En kritik yer burası: io.listen değil, httpServer.listen)
+httpServer.listen(PORT, () => {
+    console.log(`🚀 SUNUCU ARTIK CANLI! Port: ${PORT}`);
+});
