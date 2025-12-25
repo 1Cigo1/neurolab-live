@@ -1,16 +1,16 @@
-const { createServer } = require("http"); // Node'un kendi sunucusu
+const { createServer } = require("http");
 const { Server } = require("socket.io");
 
-// Render'ın verdiği portu al
+// Render'ın atadığı portu kullan
 const PORT = process.env.PORT || 3001;
 
-// 1. Önce HTTP Sunucusu oluştur (Boş bir kutu gibi düşün)
+// 1. HTTP Sunucusu oluştur
 const httpServer = createServer();
 
-// 2. Socket.io'yu bu kutunun içine kur
+// 2. Socket.io'yu bu sunucuya bağla
 const io = new Server(httpServer, {
   cors: {
-    origin: "*", // Her yerden girişe izin ver
+    origin: "*", // Herkese izin ver
     methods: ["GET", "POST"]
   }
 });
@@ -44,7 +44,7 @@ io.on("connection", (socket) => {
     });
 });
 
-// 3. KUTUYU BAŞLAT (En kritik yer burası: io.listen değil, httpServer.listen)
+// 3. DİNLEMEYİ BAŞLAT (Burada sadece httpServer dinliyor, çakışma yok)
 httpServer.listen(PORT, () => {
-    console.log(`🚀 SUNUCU ARTIK CANLI! Port: ${PORT}`);
+    console.log(`🚀 SUNUCU CANLI! Port: ${PORT}`);
 });
