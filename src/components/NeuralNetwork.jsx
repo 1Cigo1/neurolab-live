@@ -2,7 +2,6 @@ import React, { useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
-// --- ELEKTRON (VİRÜS & VERİ) ---
 const Electron = ({ start, end, speed, color, offset, isVirus }) => {
   const meshRef = useRef();
   const startVec = useMemo(() => new THREE.Vector3(...start), [start]);
@@ -11,54 +10,42 @@ const Electron = ({ start, end, speed, color, offset, isVirus }) => {
   useFrame((state) => {
     if (!meshRef.current) return;
     const time = state.clock.getElapsedTime();
-    const finalSpeed = isVirus ? speed * 2.0 : speed; 
+    const finalSpeed = isVirus ? speed * 2.5 : speed; 
     const t = (time * finalSpeed + offset) % 1; 
-    
     meshRef.current.position.lerpVectors(startVec, endVec, t);
-
+    
+    // Virüs titremesi
     if (isVirus) {
         meshRef.current.position.x += (Math.random() - 0.5) * 0.5;
         meshRef.current.position.y += (Math.random() - 0.5) * 0.5;
     }
   });
 
-  return (
-    <mesh ref={meshRef}>
-      <sphereGeometry args={[isVirus ? 0.6 : 0.3, 8, 8]} />
-      <meshBasicMaterial color={color} toneMapped={false} />
-    </mesh>
-  );
+  return <mesh ref={meshRef}><sphereGeometry args={[isVirus ? 0.6 : 0.3, 8, 8]} /><meshBasicMaterial color={color} toneMapped={false} /></mesh>;
 };
 
-// --- NÖRON ---
 const Neuron = ({ position, layerIndex, isDamaged }) => {
   const meshRef = useRef();
   const baseColor = isDamaged ? "#ff0000" : (layerIndex === 0 ? "#00aaff" : (layerIndex % 2 === 0 ? "#00ff88" : "#cc00ff"));
 
   useFrame((state) => {
     const time = state.clock.getElapsedTime();
-    const scale = 1.0 + Math.sin(time * 2 + position[0]) * 0.15;
+    // Rastgele nefes alma hızı
+    const scale = 1.0 + Math.sin(time * (1.5 + Math.random()) + position[0]) * 0.2;
     meshRef.current.scale.setScalar(scale);
   });
 
   return (
     <mesh ref={meshRef} position={position}>
-      <dodecahedronGeometry args={[1.2, 0]} /> 
-      <meshStandardMaterial 
-        color={baseColor} 
-        emissive={baseColor}
-        emissiveIntensity={isDamaged ? 3 : 1.2}
-        roughness={0.2}
-        metalness={0.8}
-      />
-      <pointLight distance={10} intensity={1} color={baseColor} />
+      <dodecahedronGeometry args={[1.5, 0]} /> {/* Nöronları iyice büyüttük */}
+      <meshStandardMaterial color={baseColor} emissive={baseColor} emissiveIntensity={isDamaged ? 3 : 1.5} roughness={0.2} />
+      <pointLight distance={15} intensity={1} color={baseColor} />
     </mesh>
   );
 };
 
-// --- BAĞLANTI ---
 const Connection = ({ start, end, isUnderAttack }) => {
-  const speed = useMemo(() => 0.3 + Math.random() * 0.4, []);
+  const speed = useMemo(() => 0.2 + Math.random() * 0.4, []); // Biraz yavaşlattık ki akış görülsün
   const offset = useMemo(() => Math.random(), []);
   
   return (
@@ -67,10 +54,8 @@ const Connection = ({ start, end, isUnderAttack }) => {
         <bufferGeometry><bufferAttribute attach="attributes-position" count={2} array={new Float32Array([...start, ...end])} itemSize={3} /></bufferGeometry>
         <lineBasicMaterial color={isUnderAttack ? "#550000" : "#ffffff"} transparent opacity={0.05} />
       </line>
-      <Electron start={start} end={end} speed={speed} color="#00aaff" offset={offset} isVirus={false} />
-      {isUnderAttack && (
-         <Electron start={start} end={end} speed={speed * 1.5} color="#ff0000" offset={offset + 0.5} isVirus={true} />
-      )}
+      <Electron start={start} end={end} speed={speed} color="#00ffff" offset={offset} isVirus={false} />
+      {isUnderAttack && <Electron start={start} end={end} speed={speed * 2.0} color="#ff0000" offset={offset + 0.5} isVirus={true} />}
     </group>
   );
 };
@@ -80,35 +65,27 @@ const NeuralNetwork = ({ architecture, isUnderAttack }) => {
     const computed = [];
     architecture.forEach((count, lIdx) => {
       const neurons = [];
-      const isInput = lIdx === 0;
-      const isOutput = lIdx === architecture.length - 1;
-
+      // Rastgelelik için her katmana özel bir 'çekirdek' noktası belirlemiyoruz,
+      // tamamen uzaya yayıyoruz.
+      
       for (let i = 0; i < count; i++) {
-        // --- YENİ 3D MATEMATİĞİ (KÜRESEL DAĞILIM) ---
+        // --- TAM KÜRESEL & KAOTİK DAĞILIM ---
+        // Fibonacci Küresi mantığıyla noktaları küre yüzeyine ve içine yayıyoruz.
         
-        // X ekseni yine katmanları ayırır ama daha sıkışık
-        const x = (lIdx - (architecture.length - 1) / 2) * 30; 
+        // Katmanlar iç içe geçmiş küreler gibi olsun
+        // Level arttıkça küre büyüsün
+        const sphereRadius = 20 + (lIdx * 10); 
         
-        let y, z;
+        // Rastgele küresel koordinatlar
+        const theta = Math.random() * Math.PI * 2; // Yatay açı
+        const phi = Math.acos((Math.random() * 2) - 1); // Dikey açı
+        
+        // Biraz rastgelelik ekle ki dümdüz küre olmasın
+        const r = sphereRadius + (Math.random() - 0.5) * 10;
 
-        if (isInput || isOutput) {
-            // Giriş ve Çıkış: Düz duvar gibi dursun
-            y = (i - (count - 1) / 2) * 12;
-            z = 0;
-        } else {
-            // ARA KATMANLAR: Spiral Küre Formu
-            // Fibonacci Spirali mantığına benzer bir dağılım
-            const radius = 15 + (count * 0.5); // Nöron sayısı arttıkça küre şişer
-            const phi = Math.acos( -1 + ( 2 * i ) / count );
-            const theta = Math.sqrt( count * Math.PI ) * phi;
-
-            y = radius * Math.cos(theta) * Math.sin(phi);
-            z = radius * Math.sin(theta) * Math.sin(phi);
-            
-            // Biraz rastgelelik (titreşim) ekle
-            y += (Math.random() - 0.5) * 5;
-            z += (Math.random() - 0.5) * 5;
-        }
+        const x = r * Math.sin(phi) * Math.cos(theta);
+        const y = r * Math.sin(phi) * Math.sin(theta);
+        const z = r * Math.cos(phi);
 
         neurons.push({ id: `${lIdx}-${i}`, position: [x, y, z], lIdx });
       }
